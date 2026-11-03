@@ -1,6 +1,6 @@
 import { Button } from '@heroui/react';
 import { ArrowUpRight, Bot as BotIcon, ListTodo, Plus } from 'lucide-react';
-import type { Bot, Group, Snapshot, Task } from '@openbot/shared';
+import type { Bot, Group, Snapshot, Task, WorkGoal, WorkArtifact } from '@openbot/shared';
 import { workActivity, conversationalText } from '@openbot/shared';
 import { BotAvatar, EmptySmall, IconButton, Status } from './Primitives';
 export const taskLabels: Record<Task['status'], string> = {
@@ -12,6 +12,67 @@ export const taskLabels: Record<Task['status'], string> = {
   failed: '遇到问题',
   cancelled: '已停止',
 };
+export function GoalCard({
+  goal,
+  bot,
+  artifacts = [],
+}: {
+  goal: WorkGoal;
+  bot?: Bot;
+  artifacts?: WorkArtifact[];
+}) {
+  const states = {
+    active: '持续负责',
+    waiting: '等待条件',
+    needs_attention: '需要你决定',
+    completed: '目标已完成',
+    cancelled: '目标已停止',
+  };
+  const stages = {
+    produced: '产物已登记',
+    verified: '验证已记录',
+    accepted: '负责人已接受',
+    applied: '已应用到项目',
+  };
+  return (
+    <div className={`task-card goal-card ${goal.state}`}>
+      <div>
+        <span className="task-state">{states[goal.state]}</span>
+        <time>
+          {new Date(goal.updatedAt).toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </time>
+      </div>
+      <p>{goal.title}</p>
+      <small>
+        <BotIcon size={12} />
+        {bot?.name ?? '数字员工'}
+      </small>
+      <div className="task-progress">
+        {!['completed', 'cancelled'].includes(goal.state) && goal.nextAction && (
+          <p>下一步：{goal.nextAction}</p>
+        )}
+        {goal.nextCheckAt && <p>下次检查：{new Date(goal.nextCheckAt).toLocaleString('zh-CN')}</p>}
+        {goal.deadline && <p>截止：{new Date(goal.deadline).toLocaleString('zh-CN')}</p>}
+        {goal.attentionReason && (
+          <p role="status" className="task-error">
+            {goal.attentionReason}
+          </p>
+        )}
+        {goal.delivery === 'applied' && <p>完成要求：交付内容已应用到目标项目</p>}
+        {artifacts
+          .filter((a) => a.goalId === goal.id)
+          .map((a) => (
+            <p key={a.id}>
+              {a.title}：{stages[a.state]}
+            </p>
+          ))}
+      </div>
+    </div>
+  );
+}
 export function TaskCard({
   task,
   bot,
@@ -55,6 +116,7 @@ export function TaskCard({
           {task.execution.health &&
             [
               'waiting_device',
+              'waiting_owner',
               'waiting_permission',
               'stalled',
               'unresponsive',
@@ -179,6 +241,19 @@ export function Overview({
           </h3>
           <ListTodo size={15} />
         </div>
+        {data.goals
+          ?.filter(
+            (g) =>
+              !g.legacy && g.groupId === group.id && !['completed', 'cancelled'].includes(g.state),
+          )
+          .map((g) => (
+            <GoalCard
+              key={g.id}
+              goal={g}
+              bot={bots.find((b) => b.id === g.botId)}
+              artifacts={data.artifacts}
+            />
+          ))}
         {active.length ? (
           active.map((t) => (
             <TaskCard

@@ -109,6 +109,19 @@ export async function createApp(options: {
   const fail = (statusCode: number, message: string) =>
     Object.assign(new Error(message), { statusCode });
   app.get('/health', async () => ({ status: 'ok', protocol: 1 }));
+  app.get<{ Params: { id: string } }>('/api/goals/:id/status', async (req) => {
+    const s = store.snapshot(),
+      goal = s.goals?.find((g) => g.id === req.params.id);
+    if (!goal) throw fail(404, '目标不存在');
+    return {
+      goal,
+      tasks: s.tasks.filter((t) => t.goalId === goal.id),
+      artifacts: s.artifacts?.filter((a) => a.goalId === goal.id),
+    };
+  });
+  app.post<{ Params: { id: string } }>('/api/goals/:id/stop', async (req) =>
+    runtime.stopGoal(req.params.id),
+  );
   app.get('/api/snapshot', async () => ({
     ...store.snapshot(),
     bridges: runtime.bridges,

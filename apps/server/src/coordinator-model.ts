@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ownershipSchemas } from './work-schemas.js';
 import type { BrainConfig } from './config.js';
 import { providerHeaders, upstreamError } from './model-providers.js';
 
@@ -27,12 +28,72 @@ const tool = (name: string, description: string, properties: object, required: s
     parameters: { type: 'object', properties, required, additionalProperties: false },
   },
 });
+const ownershipDescriptions: Record<string, string> = {
+  create_goal:
+    'Accept a persistent responsibility without starting any worker, even when devices are offline. Supply checkable criteria. Default verification=reviewed requires independent-run or explicit human review; content is only appropriate when criteria are limited to content/format checks. delivery=applied requires observed application in the target project before completion.',
+  list_goals:
+    'Search your durable responsibilities across conversations by title. Active goals come first; use offset/nextOffset for older pages. Reading a registry does not authorize disclosure or cross-chat changes.',
+  read_goal: 'Read your goal, current plan, waits, executions, artifacts and acceptance records.',
+  link_goal:
+    'On an explicit new human request, move goal communication and all its task delivery routes here. Project records require a separate explicit share_project first.',
+  plan_goal:
+    'Arrange a concrete next action, structured event waits, future check or an explicit needsHuman reason. Wait kinds: task, goal, delegation, fact, artifact, human (id=conversation), file (id=absolute path,state=exists/missing). A reconciliation timer remains unless waiting for the owner. Text replanning alone is not progress and does not reset unattended checks; only a new human request may clear an owner-decision wait.',
+  revise_goal:
+    'Only on a new human instruction, update criteria with optimistic version checking. Older execution evidence becomes stale.',
+  stop_goal:
+    'Stop the responsibility, recursively revoke delegations and request cancellation of associated executions. No automatic resumption.',
+  reopen_goal:
+    'Only on a new explicit human request, reopen a stopped or completed goal with a new requirement version and next action. Previous artifact and execution evidence is stale; this does not replay executions or restore cancelled delegations.',
+  finish_goal:
+    'Accept the GOAL separately from execution completion. Every criterion needs a current accepted/applied artifact or a completed, verified delegation. Requires expectedVersion; a goal may complete entirely through delegated work without running its own worker.',
+  delegate_goal:
+    'Offer work to a colleague on behalf of your goal without running a producer task yourself. The receiver must explicitly accept ownership; it can plan, wait or execute later.',
+  create_project:
+    'Create a shared project record scoped to this conversation. It stores versioned facts and decisions, not a shared coordinator or merged private memories.',
+  share_project:
+    'Only on a new explicit human request, authorize an existing project in another conversation. Does not move goal ownership or broadcast private chat.',
+  read_project:
+    'Read confirmed requirements, decisions and interface facts plus pending proposals accessible in this conversation. Proposals are not confirmed requirements.',
+  propose_project_fact:
+    'Propose a versioned requirement, decision or interface agreement. expectedVersion=0 creates a new key. Concurrent proposals require rereading the current version.',
+  confirm_project_fact:
+    'Only after an explicit new human confirmation, confirm the current proposed revision. Superseded execution evidence cannot pass acceptance.',
+  register_artifact:
+    'Register a produced file, real Git worktree, or worker report. Host records actual content hashes and immutable revision history. taskId must be a completed producer run of this goal. report locator is the run ID, file/git locator is an absolute path. file applicationPath fixes the intended target; git target comes from its recorded source repository.',
+  read_artifact:
+    'Inspect an accessible versioned deliverable, actual manifest, verification receipts and history.',
+  verify_artifact:
+    'Record verification of the exact current digest. json performs actual syntax parsing only; independent_run requires another accepted run started with verifyArtifactIds containing this version, plus an exact result quote. human requires new explicit owner confirmation. Verification methods do not imply unperformed tests.',
+  accept_artifact:
+    'As responsible Bot, accept a verified current artifact version. Hash or governing fact changes invalidate old verification.',
+  record_application:
+    'Observe whether the fixed target project actually matches the accepted manifest. Records application only on a match; never applies files, merges code or publishes anything itself.',
+};
 export const coordinatorTools = [
+  ...Object.entries(ownershipSchemas).map(([name, schema]) => {
+    const { $schema: _dialect, ...parameters } = z.toJSONSchema(schema);
+    return {
+      type: 'function',
+      function: { name, description: ownershipDescriptions[name], parameters },
+    };
+  }),
   tool(
     'start_worker',
     'Start asynchronous work using your own connected local capabilities. Returns immediately; reports and completion arrive as events. Continue the same task with continue_task/update_task. For a distinct next assignment within the same ongoing work context, pass its pipelineId from list_tasks; omit it for unrelated work to create a fresh pipeline. Never reuse a pipeline just because the directory or skill is similar. Use parentTaskId for a supporting subtask. All operations still use native host permissions.',
     {
       goal: string,
+      goalId: {
+        type: 'string',
+        description:
+          'Persistent goal to execute. Create a goal before substantial work; omit only for legacy one-step execution.',
+      },
+      verifyArtifactIds: {
+        type: 'array',
+        items: string,
+        maxItems: 12,
+        description:
+          'Exact artifacts to independently verify; host captures immutable versions/digests and supplies them to the worker.',
+      },
       resourceKey: {
         type: 'string',
         description:

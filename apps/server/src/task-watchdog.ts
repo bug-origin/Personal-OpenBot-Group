@@ -66,6 +66,16 @@ export class TaskWatchdog {
     if (task.status === 'queued') {
       state = this.hooks.connected(task.botId) ? 'queued' : 'waiting_device';
       detail = state === 'queued' ? '等待管道、资源或执行名额' : '等待本地执行连接';
+      const owner = task.goalId
+        ? (this.store.db
+            .prepare('SELECT owner_wait,attention_reason FROM work_goals WHERE id=?')
+            .get(task.goalId) as
+            { owner_wait: number; attention_reason: string | null } | undefined)
+        : undefined;
+      if (owner?.owner_wait) {
+        state = 'waiting_owner';
+        detail = owner.attention_reason ?? '等待所有者决定目标的后续安排';
+      }
     } else if (['running', 'cancelling'].includes(task.status)) {
       if (pending) {
         state = 'waiting_permission';

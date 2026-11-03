@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import type { Bot, Snapshot } from '@openbot/shared';
 import { BotAvatar, Dialog, EmptySmall, Status } from './Primitives';
-import { TaskCard } from './Overview';
+import { TaskCard, GoalCard } from './Overview';
 export function BotsView({
   data,
   onCreate,
@@ -131,6 +131,8 @@ export function BotsView({
 }
 export function ActivityView({ data, onGroup }: { data: Snapshot; onGroup: (id: string) => void }) {
   const [tab, setTab] = useState<'messages' | 'tasks'>('messages');
+  const goals = data.goals?.filter((g) => !g.legacy) ?? [];
+  const workCount = data.tasks.length + goals.length;
   const messages = data.messages
     .filter((m) => m.senderType !== 'system')
     .slice()
@@ -144,7 +146,7 @@ export function ActivityView({ data, onGroup }: { data: Snapshot; onGroup: (id: 
           <p>每一次交流，每一步进展，都留在这里。</p>
         </div>
         <span className="history-count">
-          {messages.length} 条消息 · {data.tasks.length} 项工作
+          {messages.length} 条消息 · {workCount} 项工作
         </span>
       </div>
       <div className="activity-tabs">
@@ -154,7 +156,7 @@ export function ActivityView({ data, onGroup }: { data: Snapshot; onGroup: (id: 
         </button>
         <button className={tab === 'tasks' ? 'active' : ''} onClick={() => setTab('tasks')}>
           <Activity size={16} />
-          工作进展<span>{data.tasks.length}</span>
+          工作进展<span>{workCount}</span>
         </button>
       </div>
       {tab === 'messages' ? (
@@ -200,8 +202,19 @@ export function ActivityView({ data, onGroup }: { data: Snapshot; onGroup: (id: 
             description="群组中的消息会实时出现在这里。"
           />
         )
-      ) : data.tasks.length ? (
+      ) : workCount ? (
         <div className="task-history">
+          {goals
+            .slice()
+            .reverse()
+            .map((g) => (
+              <GoalCard
+                key={g.id}
+                goal={g}
+                bot={data.bots.find((b) => b.id === g.botId)}
+                artifacts={data.artifacts}
+              />
+            ))}
           {data.tasks
             .slice()
             .reverse()
@@ -213,7 +226,7 @@ export function ActivityView({ data, onGroup }: { data: Snapshot; onGroup: (id: 
         <EmptySmall
           icon={<Activity size={25} />}
           title="还没有工作记录"
-          description="本地 Bridge 接入并执行任务后，进展会保存在这里。"
+          description="交给数字员工持续负责的目标与执行进展会保存在这里。"
         />
       )}
     </div>

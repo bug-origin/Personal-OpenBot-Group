@@ -64,6 +64,7 @@ export interface Message {
 }
 export interface Task {
   id: string;
+  goalId?: string | null;
   groupId: string;
   originGroupId?: string;
   botId: string;
@@ -111,6 +112,9 @@ export interface TaskExecution {
   changes: { version: number; instruction: string; createdAt: string }[];
 }
 export interface Snapshot {
+  goals?: WorkGoal[];
+  artifacts?: WorkArtifact[];
+  projects?: { id: string; name: string; groupIds: string[] }[];
   groups: Group[];
   bots: Bot[];
   messages: Message[];
@@ -131,6 +135,46 @@ export interface Snapshot {
     error: string;
     stage?: 'attention' | 'dialogue';
   }[];
+}
+export interface WorkGoal {
+  id: string;
+  botId: string;
+  groupId: string;
+  sourceMessageId: string | null;
+  projectId: string | null;
+  title: string;
+  criteria: string[];
+  version: number;
+  state: 'active' | 'waiting' | 'needs_attention' | 'completed' | 'cancelled';
+  nextAction: string;
+  nextCheckAt: string | null;
+  deadline: string | null;
+  generation: number;
+  unattendedChecks: number;
+  attentionReason: string | null;
+  ownerWait: number;
+  legacy: number;
+  delivery: 'accepted' | 'applied';
+  verification: 'reviewed' | 'content';
+  result: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface WorkArtifact {
+  id: string;
+  goalId: string;
+  taskId: string | null;
+  producerRunId: string | null;
+  title: string;
+  kind: 'file' | 'git' | 'report';
+  locator: string;
+  applicationPath: string | null;
+  version: number;
+  digest: string;
+  manifest: string;
+  state: 'produced' | 'verified' | 'accepted' | 'applied';
+  createdAt: string;
+  updatedAt: string;
 }
 export const providerLabel: Record<Provider, string> = {
   'claude-code': 'Claude Code',
@@ -164,6 +208,8 @@ export interface Approval {
   createdAt: string;
 }
 export interface AgentJob {
+  projectFacts?: { id: string; key: string; version: number; kind: string; content: string }[];
+  artifactsToVerify?: WorkArtifact[];
   task: Task;
   leaseId: string;
   bot: Bot;

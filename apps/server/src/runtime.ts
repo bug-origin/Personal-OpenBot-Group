@@ -25,6 +25,11 @@ import type { AttentionModel } from './attention-model.js';
 import { TaskPipelines } from './task-pipelines.js';
 import { TaskContracts } from './task-contracts.js';
 import { TaskResources } from './task-resources.js';
+import { WorkGoals } from './work-goals.js';
+import { ProjectFacts, type ProjectFact } from './project-facts.js';
+import { WorkArtifacts } from './work-artifacts.js';
+import type { WorkArtifact } from '@openbot/shared';
+import { BotDelegations } from './bot-delegations.js';
 type Link = { info: BridgeInfo; send: (command: BridgeCommand) => void; close: () => void };
 export class Runtime {
   private links = new Map<string, Link>();
@@ -43,6 +48,9 @@ export class Runtime {
   private pipelines: TaskPipelines;
   private contracts: TaskContracts;
   private resources: TaskResources;
+  private goals: WorkGoals;
+  private facts: ProjectFacts;
+  private artifacts: WorkArtifacts;
   constructor(
     private store: Store,
     private changed: () => void,
@@ -57,6 +65,9 @@ export class Runtime {
     this.pipelines = new TaskPipelines(store);
     this.contracts = new TaskContracts(store);
     this.resources = new TaskResources(store);
+    this.goals = new WorkGoals(store);
+    this.facts = new ProjectFacts(store);
+    this.artifacts = new WorkArtifacts(store);
     this.ui = new UiService(store, changed, (message) => this.accept(message));
     this.native = new NativeRequests(store, changed, (taskId, leaseId, requestId, response) => {
       const botId = this.store.snapshot().tasks.find((t) => t.id === taskId)?.botId;
@@ -516,7 +527,12 @@ export class Runtime {
             ?.info.providers.filter((p) => p.available)
             .map((p) => p.provider) ?? [])
         : [];
-      const selected = options?.provider ?? (this.coordinator ? available[0] : b.provider);
+      const selected =
+        options?.provider ?? (this.coordinator ? (available[0] ?? b.provider) : b.provider);
+      if (this.coordinator) {
+        executionProvider.set(b, selected);
+        return true;
+      }
       if (selected && this.ready(b, selected)) {
         executionProvider.set(b, selected);
         return true;
@@ -540,9 +556,21 @@ export class Runtime {
     const created: string[] = [];
     for (const b of online) {
       const id = randomUUID();
+      const ownedGoal = this.coordinator
+        ? options?.goalId
+          ? this.goals.get(options.goalId, b.id, group.id)
+          : this.goals.create(
+              message,
+              b.id,
+              goal ?? message.content,
+              options?.criteria?.length ? options.criteria : [goal ?? message.content],
+              { legacy: true },
+            )
+        : undefined;
+      if (ownedGoal) this.goals.usable(ownedGoal);
       this.store.db
         .prepare(
-          'INSERT INTO tasks(id,group_id,bot_id,input,status,created_at,correlation_id,round) VALUES(?,?,?,?,?,?,?,?)',
+          'INSERT INTO tasks(id,group_id,bot_id,input,status,created_at,correlation_id,round,goal_id) VALUES(?,?,?,?,?,?,?,?,?)',
         )
         .run(
           id,
@@ -553,6 +581,7 @@ export class Runtime {
           new Date().toISOString(),
           chainId,
           round,
+          ownedGoal?.id ?? null,
         );
       this.store.db
         .prepare('INSERT INTO task_runtime(task_id,source_message_id) VALUES(?,?)')
@@ -574,7 +603,7 @@ export class Runtime {
         }
         this.store.db
           .prepare(
-            'INSERT INTO task_workers(task_id,provider,resource_key,parent_task_id,silent,resource_mode) VALUES(?,?,?,?,?,?)',
+            'INSERT INTO task_workers(task_id,provider,resource_key,parent_task_id,silent,resource_mode,verify_artifact_ids) VALUES(?,?,?,?,?,?,?)',
           )
           .run(
             id,
@@ -583,6 +612,7 @@ export class Runtime {
             options?.parentTaskId ?? null,
             options?.silent ? 1 : 0,
             options?.resourceMode ?? 'exclusive',
+            JSON.stringify(options?.verifyArtifactIds ?? []),
           );
       }
       if (this.conversations) {
@@ -645,6 +675,7 @@ export class Runtime {
           .prepare('SELECT provider,resource_key FROM task_workers WHERE task_id=?')
           .get(task.id) as { provider: Provider; resource_key: string } | undefined;
         const provider = worker?.provider ?? bot.provider;
+        if (task.goalId && this.goals.get(task.goalId).ownerWait) continue;
         if (!this.ready(bot, provider)) continue;
         if (worker && this.pipelines.busy(task.id)) continue;
         if (this.coordinator && !this.contracts.canRun(task.id)) {
@@ -778,47 +809,82 @@ export class Runtime {
               .slice(-24)
               .map((m) => ({ ...m, content: m.content.slice(0, 4000) }));
         const leaseId = randomUUID();
-        this.store.db.transaction(() => {
-          this.store.db
-            .prepare(
-              "UPDATE tasks SET status='running',started_at=? WHERE id=? AND status='queued'",
-            )
-            .run(new Date().toISOString(), task.id);
-          this.store.db
-            .prepare('UPDATE task_runtime SET lease_id=? WHERE task_id=?')
-            .run(leaseId, task.id);
-          this.store.db
-            .prepare(
-              'UPDATE task_health SET last_activity_at=?,last_heartbeat_at=NULL WHERE task_id=?',
-            )
-            .run(new Date().toISOString(), task.id);
-          this.store.db.prepare("UPDATE bots SET status='thinking' WHERE id=?").run(bot.id);
-          if (this.coordinator)
+        let projectFacts: ProjectFact[] = [];
+        let artifactsToVerify: WorkArtifact[] = [];
+        try {
+          this.store.db.transaction(() => {
             this.store.db
               .prepare(
-                'INSERT INTO worker_runs(id,task_id,bot_id,bridge_id,provider,requirement_version,status,started_at) VALUES(?,?,?,?,?,?,?,?)',
-              )
-              .run(
-                leaseId,
-                task.id,
-                bot.id,
-                bot.bridgeId,
-                provider,
-                spec?.version ?? 1,
-                'running',
-                new Date().toISOString(),
-              );
-          if (spec) {
-            this.store.db
-              .prepare(
-                "UPDATE task_specs SET executed_version=version,activity='正在启动本地执行会话',report=NULL,updated_at=? WHERE task_id=?",
+                "UPDATE tasks SET status='running',started_at=? WHERE id=? AND status='queued'",
               )
               .run(new Date().toISOString(), task.id);
-          }
-        })();
+            this.store.db
+              .prepare('UPDATE task_runtime SET lease_id=? WHERE task_id=?')
+              .run(leaseId, task.id);
+            this.store.db
+              .prepare(
+                'UPDATE task_health SET last_activity_at=?,last_heartbeat_at=NULL WHERE task_id=?',
+              )
+              .run(new Date().toISOString(), task.id);
+            this.store.db.prepare("UPDATE bots SET status='thinking' WHERE id=?").run(bot.id);
+            if (this.coordinator)
+              this.store.db
+                .prepare(
+                  'INSERT INTO worker_runs(id,task_id,bot_id,bridge_id,provider,requirement_version,status,started_at,goal_version) VALUES(?,?,?,?,?,?,?,?,?)',
+                )
+                .run(
+                  leaseId,
+                  task.id,
+                  bot.id,
+                  bot.bridgeId,
+                  provider,
+                  spec?.version ?? 1,
+                  'running',
+                  new Date().toISOString(),
+                  task.goalId ? this.goals.get(task.goalId).version : 1,
+                );
+            if (this.coordinator && task.goalId) {
+              projectFacts = this.facts.capture(task.goalId, leaseId);
+              const refs = this.store.db
+                .prepare('SELECT verify_artifact_ids FROM task_workers WHERE task_id=?')
+                .get(task.id) as { verify_artifact_ids: string };
+              artifactsToVerify = this.artifacts.capture(
+                JSON.parse(refs.verify_artifact_ids),
+                leaseId,
+                bot.id,
+                task.groupId,
+              );
+            }
+            if (spec) {
+              this.store.db
+                .prepare(
+                  "UPDATE task_specs SET executed_version=version,activity='正在启动本地执行会话',report=NULL,updated_at=? WHERE task_id=?",
+                )
+                .run(new Date().toISOString(), task.id);
+            }
+          })();
+        } catch (error) {
+          this.store.db
+            .prepare("UPDATE tasks SET status='failed',error=?,finished_at=? WHERE id=?")
+            .run(
+              error instanceof Error ? error.message.slice(0, 500) : '工作资料发生变化，请重新核实',
+              new Date().toISOString(),
+              task.id,
+            );
+          if (task.goalId)
+            this.goals.attention(task.goalId, '执行资料或交付版本已变化，需要重新安排');
+          this.conversations?.complete(
+            this.store.snapshot().tasks.find((t) => t.id === task.id)!,
+            `context:${randomUUID()}`,
+          );
+          this.changed();
+          continue;
+        }
         const currentTask = this.store.snapshot().tasks.find((t) => t.id === task.id)!;
         const job: AgentJob = {
           task: currentTask,
+          projectFacts,
+          artifactsToVerify,
           leaseId,
           bot: { ...bot, provider },
           group,
@@ -1222,6 +1288,19 @@ export class Runtime {
     if (!task) throw Object.assign(new Error('任务不存在'), { statusCode: 404 });
     return { task, summary: formatTaskStatus(task) };
   }
+  stopGoal(id: string) {
+    const result =
+      this.conversations instanceof BotCoordinator
+        ? this.conversations.stopGoal(id)
+        : new BotDelegations(
+            this.store,
+            () => {},
+            (taskId) => this.stopTask(taskId),
+          ).cancelGoal(id);
+    this.changed();
+    this.schedule();
+    return result;
+  }
   resumeTask(id: string, instruction: string, expectedVersion: number) {
     const state = this.store.snapshot();
     const task = this.taskStatus(id).task;
@@ -1261,6 +1340,10 @@ export class Runtime {
   }
   continueTask(id: string, message: Message, expectedVersion: number, provider?: Provider) {
     const task = this.taskStatus(id).task;
+    if (task.goalId) {
+      const goal = this.goals.get(task.goalId);
+      if (!goal.legacy) this.goals.usable(goal);
+    }
     if (this.coordinator) {
       const chain = this.store.db
         .prepare('SELECT stopped,calls,max_calls FROM collaboration_chains WHERE id=?')
@@ -1366,6 +1449,12 @@ export class Runtime {
       this.store.db
         .prepare('UPDATE collaboration_chains SET calls=calls+1 WHERE id=?')
         .run(message.correlationId);
+      if (task.goalId)
+        this.store.db
+          .prepare(
+            "UPDATE work_goals SET state='active',next_check_at=?,result=NULL WHERE id=? AND legacy=1",
+          )
+          .run(new Date(Date.now() + 300000).toISOString(), task.goalId);
     })();
     this.changed();
     this.schedule();
@@ -1405,6 +1494,14 @@ export class Runtime {
   }
   stopTask(id: string) {
     const task = this.taskStatus(id).task;
+    if (task.goalId) {
+      const g = this.goals.get(task.goalId);
+      if (!g.legacy) this.goals.attention(g.id, '本次执行已停止，等待所有者决定目标的后续安排');
+      else
+        this.store.db
+          .prepare("UPDATE work_goals SET state='cancelled',next_check_at=NULL WHERE id=?")
+          .run(g.id);
+    }
     if (this.conversations instanceof BotCoordinator) this.conversations.cancelDelegations(id);
     this.store.db
       .prepare('UPDATE task_workers SET stopped=1 WHERE task_id=? OR parent_task_id=?')

@@ -92,6 +92,9 @@ export class TaskContracts {
     this.store.db
       .prepare('UPDATE task_runtime SET source_message_id=? WHERE task_id=?')
       .run(source.id, task.id);
+    this.store.db
+      .prepare('UPDATE work_goals SET group_id=?,source_message_id=? WHERE id=? AND legacy=1')
+      .run(source.groupId, source.id, task.goalId ?? null);
     // Pending outcomes follow the explicitly selected conversation, never broadcast to every link.
     this.store.db
       .prepare(

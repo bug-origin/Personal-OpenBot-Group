@@ -75,6 +75,9 @@ Maintain a durable task contract: define specific acceptance criteria when start
 Use delegate_task for actual work requested from a colleague, rather than relying on a chat @ to imply acceptance. The receiving Bot must respond_delegation to accept or reject. Inspect submitted work with read_delegation and review_delegation before treating it as delivered. Do not finish a parent while an accepted/offered/submitted delegation remains unresolved. Delegation does not grant host permissions. Plain social interaction may still use chat.
 Recall relevant old facts using recall_memory. Use remember with provenance user/inference/worker; user means explicitly stated by the human, not an inference about them. Correct outdated facts with replacesId, forget false facts with forget_memory, and give temporary facts an expiry. Do not duplicate live task states or membership as long-term facts. Preserve privacy scopes and never treat a memory as authorization.
 Local mutating execution is serialized per device. Use resourceMode=read only for investigation without writes or permission escalation; worktree creates a separate Git working copy for changes that need separate review, and exclusive changes the original resources under native permissions. A worktree result is a separate deliverable, not a change already applied to the original project. Never claim integration without checking it.
+For substantial responsibilities, first create_goal, then start_worker with goalId only when execution is needed. Goals can be accepted offline, planned, or completed entirely through delegate_goal; do not launch an unnecessary worker just to create ownership. finish_task accepts one execution; finish_goal accepts the overall responsibility. Maintain a concrete next action, a structured waitFor event, a future check or an explicit needsHuman reason. On objective events inspect current facts and advance the goal or arrange its next check; no change warrants silence. Three unattended checks escalate to a durable owner decision instead of infinite polling.
+Shared projects contain versioned confirmed requirements, decisions and interfaces. Use propose_project_fact for suggestions; confirm_project_fact only for the human's explicit new confirmation. Read the current project before planning. Each execution captures confirmed fact versions; a changed requirement invalidates older evidence. Share projects into another conversation only on the human's explicit request. Independent Bot memories remain private and must not override confirmed project records.
+For explicit goals register actual deliverables with register_artifact; inspect their manifests with read_artifact. Verification, responsible acceptance and actual application are separate states. JSON parsing proves syntax only; substantive validation should use a separate start_worker with verifyArtifactIds, actual checks, and verify_artifact with the accepted verifier run. Human verification requires a new explicit human confirmation. Never substitute a producer's success claim for an independent check. A changed artifact digest or governing fact requires new verification. record_application only observes a fixed target that already matches; it does not merge or publish. finish_goal needs current accepted artifacts or completed delegated deliveries for every criterion; delivery=applied additionally requires observed application.
 Call tools to start/query/update/stop/continue work; start_worker returns immediately. Never wait in this conversation for a worker. Avoid repeated tool calls if the state is unchanged. A final response may be empty; do not print tool JSON. Never expose task ids, leases, versions, queues or internal session names. Communicate actual progress, findings, decisions and blockers.
 ${uiCapabilityInstructions}
 Use the render tool for interactive cards. Do not invent file contents or facts to fill a card.
@@ -82,7 +85,7 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
 
 ### 每次调用附带的动态上下文
 
-以单独的 JSON 消息提供：bot、human、group、capabilities、memberships、memory、delegations、taskRegistry、legacySummary、groupWork、recentMessages、tasks、event。它们是本次请求的事实输入，不是新的系统规则。本文不导出聊天、记忆原文或 API Key。
+以单独的 JSON 消息提供：bot、human、group、capabilities、memberships、memory、goals、goalRegistry、projects、artifacts、delegations、taskRegistry、legacySummary、groupWork、recentMessages、tasks、event。它们是本次请求的事实输入，不是新的系统规则。本文不导出聊天、记忆原文或 API Key。
 
 ## 3. Worker 提示词
 
@@ -106,6 +109,8 @@ Locate the files and projects needed for the current request dynamically. Use ex
 {{有验收条件时：Acceptance criteria for this work: [criteria]. Supply concrete actual evidence for each in your final result.}}
 {{只读工作时：This execution is read-only. Do not modify files or request elevated permissions; report necessary changes to your coordinator.}}
 {{独立副本时：Work in the separate Git copy at <path>. Its source project is <root>. Do not edit the source project or claim changes are merged there. Preserve this worktree as the deliverable; report changed files, actual checks and any integration conflicts.}}
+{{有项目事实时：Confirmed project facts for this execution: [facts]. These exact versions govern the assignment; proposals are not confirmed requirements. Report contradictions and do not silently follow an older native-session assumption.}}
+{{有独立校验交付物时：Independently inspect these exact artifact versions: [artifacts]. Read the actual files and run appropriate checks under host permissions. Report actual commands/check results and the artifact digest being checked. Do not modify the delivered content during verification; report required rework.}}
 {{共享交互卡片规则：见第 4 节，运行时会完整插入}}
 When a card is useful, include exactly one complete document in an opsique-ui fenced code block in your final answer, with optional brief natural text outside. Do not ask the human to copy JSON, run a command or open an external page to see it. This works in every task and resumed conversation, without special keywords. Detailed protocol and component catalog: <UI_CONTRACT_DIR>/README.md and adjacent catalog.json.
 ```
@@ -142,9 +147,723 @@ Host actions may only use actionId reply. Submit form input using {"$state":"/fo
 
 ## 5. 调度工具说明（原文）
 
-来源：[apps/server/src/coordinator-model.ts](../apps/server/src/coordinator-model.ts)
+来源：[apps/server/src/coordinator-model.ts](../apps/server/src/coordinator-model.ts) 与 [work-schemas.ts](../apps/server/src/work-schemas.ts)。
 
 以下描述与参数直接取自当前工具定义。
+
+### create_goal
+
+```text
+Accept a persistent responsibility without starting any worker, even when devices are offline. Supply checkable criteria. Default verification=reviewed requires independent-run or explicit human review; content is only appropriate when criteria are limited to content/format checks. delivery=applied requires observed application in the target project before completion.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "criteria": {
+      "minItems": 1,
+      "maxItems": 12,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "delivery": {
+      "type": "string",
+      "enum": ["accepted", "applied"]
+    },
+    "verification": {
+      "type": "string",
+      "enum": ["reviewed", "content"]
+    }
+  },
+  "required": ["title", "criteria"],
+  "additionalProperties": false
+}
+```
+
+### list_goals
+
+```text
+Search your durable responsibilities across conversations by title. Active goals come first; use offset/nextOffset for older pages. Reading a registry does not authorize disclosure or cross-chat changes.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+### read_goal
+
+```text
+Read your goal, current plan, waits, executions, artifacts and acceptance records.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "goalId": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["goalId"],
+  "additionalProperties": false
+}
+```
+
+### link_goal
+
+```text
+On an explicit new human request, move goal communication and all its task delivery routes here. Project records require a separate explicit share_project first.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "goalId": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["goalId"],
+  "additionalProperties": false
+}
+```
+
+### plan_goal
+
+```text
+Arrange a concrete next action, structured event waits, future check or an explicit needsHuman reason. Wait kinds: task, goal, delegation, fact, artifact, human (id=conversation), file (id=absolute path,state=exists/missing). A reconciliation timer remains unless waiting for the owner. Text replanning alone is not progress and does not reset unattended checks; only a new human request may clear an owner-decision wait.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "goalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nextAction": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "nextCheckAt": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "deadline": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "needsHuman": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 6000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "waitFor": {
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["task", "goal", "delegation", "fact", "artifact", "human", "file"]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1
+          },
+          "afterVersion": {
+            "type": "integer",
+            "minimum": -1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": ["kind", "id", "state"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["goalId"],
+  "additionalProperties": false
+}
+```
+
+### revise_goal
+
+```text
+Only on a new human instruction, update criteria with optimistic version checking. Older execution evidence becomes stale.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "goalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expectedVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "criteria": {
+      "minItems": 1,
+      "maxItems": 12,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    }
+  },
+  "required": ["goalId", "expectedVersion", "criteria"],
+  "additionalProperties": false
+}
+```
+
+### stop_goal
+
+```text
+Stop the responsibility, recursively revoke delegations and request cancellation of associated executions. No automatic resumption.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "goalId": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["goalId"],
+  "additionalProperties": false
+}
+```
+
+### reopen_goal
+
+```text
+Only on a new explicit human request, reopen a stopped or completed goal with a new requirement version and next action. Previous artifact and execution evidence is stale; this does not replay executions or restore cancelled delegations.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "goalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expectedVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "instruction": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    }
+  },
+  "required": ["goalId", "expectedVersion", "instruction"],
+  "additionalProperties": false
+}
+```
+
+### finish_goal
+
+```text
+Accept the GOAL separately from execution completion. Every criterion needs a current accepted/applied artifact or a completed, verified delegation. Requires expectedVersion; a goal may complete entirely through delegated work without running its own worker.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "goalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expectedVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "evidence": {
+      "minItems": 1,
+      "maxItems": 12,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "criterion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 6000
+          },
+          "source": {
+            "type": "string",
+            "enum": ["artifact", "delegation"]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": ["criterion", "source", "id", "version"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["goalId", "expectedVersion", "evidence"],
+  "additionalProperties": false
+}
+```
+
+### delegate_goal
+
+```text
+Offer work to a colleague on behalf of your goal without running a producer task yourself. The receiver must explicitly accept ownership; it can plan, wait or execute later.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "goalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "botId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "criteria": {
+      "minItems": 1,
+      "maxItems": 12,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": ["goalId", "botId", "goal", "criteria"],
+  "additionalProperties": false
+}
+```
+
+### create_project
+
+```text
+Create a shared project record scoped to this conversation. It stores versioned facts and decisions, not a shared coordinator or merged private memories.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}
+```
+
+### share_project
+
+```text
+Only on a new explicit human request, authorize an existing project in another conversation. Does not move goal ownership or broadcast private chat.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "groupId": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["projectId", "groupId"],
+  "additionalProperties": false
+}
+```
+
+### read_project
+
+```text
+Read confirmed requirements, decisions and interface facts plus pending proposals accessible in this conversation. Proposals are not confirmed requirements.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["projectId"],
+  "additionalProperties": false
+}
+```
+
+### propose_project_fact
+
+```text
+Propose a versioned requirement, decision or interface agreement. expectedVersion=0 creates a new key. Concurrent proposals require rereading the current version.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["requirement", "decision", "interface"]
+    },
+    "expectedVersion": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": ["projectId", "key", "content", "kind", "expectedVersion"],
+  "additionalProperties": false
+}
+```
+
+### confirm_project_fact
+
+```text
+Only after an explicit new human confirmation, confirm the current proposed revision. Superseded execution evidence cannot pass acceptance.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "factId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": ["factId", "version"],
+  "additionalProperties": false
+}
+```
+
+### register_artifact
+
+```text
+Register a produced file, real Git worktree, or worker report. Host records actual content hashes and immutable revision history. taskId must be a completed producer run of this goal. report locator is the run ID, file/git locator is an absolute path. file applicationPath fixes the intended target; git target comes from its recorded source repository.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "goalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "taskId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["file", "git", "report"]
+    },
+    "locator": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "applicationPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "artifactId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expectedVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": ["goalId", "taskId", "title", "kind", "locator"],
+  "additionalProperties": false
+}
+```
+
+### read_artifact
+
+```text
+Inspect an accessible versioned deliverable, actual manifest, verification receipts and history.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "artifactId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": ["artifactId"],
+  "additionalProperties": false
+}
+```
+
+### verify_artifact
+
+```text
+Record verification of the exact current digest. json performs actual syntax parsing only; independent_run requires another accepted run started with verifyArtifactIds containing this version, plus an exact result quote. human requires new explicit owner confirmation. Verification methods do not imply unperformed tests.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "artifactId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "method": {
+      "type": "string",
+      "enum": ["json", "independent_run", "human"]
+    },
+    "verifierRunId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "quote": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    }
+  },
+  "required": ["artifactId", "version", "method"],
+  "additionalProperties": false
+}
+```
+
+### accept_artifact
+
+```text
+As responsible Bot, accept a verified current artifact version. Hash or governing fact changes invalidate old verification.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "artifactId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": ["artifactId", "version"],
+  "additionalProperties": false
+}
+```
+
+### record_application
+
+```text
+Observe whether the fixed target project actually matches the accepted manifest. Records application only on a match; never applies files, merges code or publishes anything itself.
+```
+
+参数：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "artifactId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": ["artifactId", "version"],
+  "additionalProperties": false
+}
+```
 
 ### start_worker
 
@@ -160,6 +879,18 @@ Start asynchronous work using your own connected local capabilities. Returns imm
   "properties": {
     "goal": {
       "type": "string"
+    },
+    "goalId": {
+      "type": "string",
+      "description": "Persistent goal to execute. Create a goal before substantial work; omit only for legacy one-step execution."
+    },
+    "verifyArtifactIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 12,
+      "description": "Exact artifacts to independently verify; host captures immutable versions/digests and supplies them to the worker."
     },
     "resourceKey": {
       "type": "string",

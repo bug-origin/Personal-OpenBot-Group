@@ -14,6 +14,14 @@ export function removeGroup(store: Store, id: string) {
     if (
       db
         .prepare(
+          "SELECT 1 FROM work_goals WHERE group_id=? AND legacy=0 AND state NOT IN ('completed','cancelled') LIMIT 1",
+        )
+        .get(id)
+    )
+      fail(409, '群内还有持续负责的目标，请先接续到其他对话或停止目标后再删除');
+    if (
+      db
+        .prepare(
           "SELECT 1 FROM tasks WHERE (group_id=? OR id IN (SELECT task_id FROM task_conversations WHERE group_id=?)) AND status IN ('queued','running','cancelling','reviewing') LIMIT 1",
         )
         .get(id, id)
@@ -130,6 +138,7 @@ export function removeGroup(store: Store, id: string) {
     ).run(id);
     db.prepare('DELETE FROM task_pipelines WHERE group_id=?').run(id);
     db.prepare('DELETE FROM tasks WHERE group_id=?').run(id);
+    db.prepare('DELETE FROM work_goals WHERE group_id=?').run(id);
     db.prepare('DELETE FROM conversation_memory WHERE group_id=?').run(id);
     db.prepare('DELETE FROM agent_sessions WHERE group_id=?').run(id);
     db.prepare('DELETE FROM bot_memory WHERE group_id=?').run(id);

@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import type { Bot, Group, Message, Snapshot, Task, TaskExecution } from '@openbot/shared';
+import { goalSelect, artifactSelect } from './work-records.js';
+import type { WorkGoal, WorkArtifact } from '@openbot/shared';
 export function createStore(path: string) {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
@@ -22,6 +24,7 @@ export function createStore(path: string) {
     '012_bot_attention.sql',
     '013_task_pipelines.sql',
     '014_durable_work.sql',
+    '015_work_ownership.sql',
   ]) {
     const hasHistory = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'")
@@ -193,8 +196,19 @@ export function createStore(path: string) {
         };
       }),
       tasks: all<Task>(
-        'SELECT t.id, COALESCE(r.group_id,t.group_id) AS groupId, t.group_id AS originGroupId, bot_id AS botId, input, status, created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt, result, error, correlation_id AS correlationId, round FROM tasks t LEFT JOIN task_routes r ON r.task_id=t.id ORDER BY created_at',
+        'SELECT t.id,t.goal_id AS goalId, COALESCE(r.group_id,t.group_id) AS groupId, t.group_id AS originGroupId, bot_id AS botId, input, status, created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt, result, error, correlation_id AS correlationId, round FROM tasks t LEFT JOIN task_routes r ON r.task_id=t.id ORDER BY created_at',
       ).map((t) => ({ ...t, execution: execution(t.id) })),
+      goals: all<Omit<WorkGoal, 'criteria'> & { criteria: string }>(
+        `${goalSelect} ORDER BY created_at`,
+      ).map((g) => ({ ...g, criteria: JSON.parse(g.criteria) })),
+      artifacts: all<WorkArtifact>(`${artifactSelect} ORDER BY created_at`),
+      projects: all<{ id: string; name: string }>('SELECT id,name FROM work_projects').map((p) => ({
+        ...p,
+        groupIds: all<{ group_id: string }>(
+          'SELECT group_id FROM project_groups WHERE project_id=?',
+          p.id,
+        ).map((g) => g.group_id),
+      })),
       conversations: all(
         "SELECT DISTINCT bot_id AS botId,group_id AS groupId,status FROM dialogue_inbox WHERE status IN ('queued','processing')",
       ),

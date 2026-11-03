@@ -16,6 +16,11 @@ import { TaskWatchdog, type ReportKind } from './task-watchdog.js';
 import { TaskContracts, type WorkPlan, type AcceptanceEvidence } from './task-contracts.js';
 import { BotMemory, type MemoryInput } from './bot-memory.js';
 import { BotDelegations } from './bot-delegations.js';
+import { WorkGoals, type GoalPlan, type GoalEvidence } from './work-goals.js';
+import { ProjectFacts } from './project-facts.js';
+import { WorkArtifacts } from './work-artifacts.js';
+import { ownershipSchemas } from './work-schemas.js';
+import type { WorkGoal, WorkArtifact } from '@openbot/shared';
 
 type Inbox = {
   id: string;
@@ -23,6 +28,7 @@ type Inbox = {
   group_id: string;
   source_message_id: string | null;
   task_id: string | null;
+  goal_id: string | null;
   kind: string;
   payload: string;
 };
@@ -34,6 +40,8 @@ export interface WorkerOptions {
   pipelineId?: string;
   resourceMode?: 'read' | 'exclusive' | 'worktree';
   criteria?: string[];
+  goalId?: string;
+  verifyArtifactIds?: string[];
 }
 export interface CoordinatorHooks {
   create(
@@ -57,9 +65,12 @@ const date = z.string().datetime({ offset: true });
 const silenceNarration =
   /^\s*[（(]?(?:(?:(?:这条|这句|这次|这个问题)[^。！？\n]{0,100}?)?我(?:这边)?(?:先|就|暂时)?(?:不插话|不参与|保持沉默|不接|不回应|不说话)|保持沉默)(?:[，,；;](?:等|待|后续|需要时|由|让|交给)[^。！？\n]{0,120})?[。.!！?？]?[）)]?\s*$/;
 const schemas = {
+  ...ownershipSchemas,
   start_worker: z
     .object({
       goal: text,
+      goalId: taskId.optional(),
+      verifyArtifactIds: z.array(taskId).max(12).optional(),
       resourceKey: z.string().max(4096).optional(),
       contextMessageIds: z.array(z.string()).max(4).optional(),
       parentTaskId: taskId.optional(),
@@ -146,7 +157,7 @@ type AttentionState = {
   attempts: number;
   error: string | null;
 };
-const maxRounds = 5;
+const maxRounds = 12;
 
 /** One ordered, durable event stream per Bot. Native work always runs asynchronously. */
 export class BotCoordinator {
@@ -157,6 +168,9 @@ export class BotCoordinator {
   private contracts: TaskContracts;
   private memory: BotMemory;
   private delegations: BotDelegations;
+  private goals: WorkGoals;
+  private facts: ProjectFacts;
+  private artifacts: WorkArtifacts;
   private processing = new Map<string, { row: Inbox; controller: AbortController }>();
   constructor(
     private store: Store,
@@ -167,6 +181,9 @@ export class BotCoordinator {
   ) {
     this.contracts = new TaskContracts(store);
     this.memory = new BotMemory(store);
+    this.goals = new WorkGoals(store);
+    this.facts = new ProjectFacts(store);
+    this.artifacts = new WorkArtifacts(store);
     this.delegations = new BotDelegations(store, (...args) => this.notify(...args), hooks.stop);
     this.maintenance = new TaskWatchdog(store, {
       connected: (id) => hooks.providers(id).length > 0,
@@ -196,6 +213,7 @@ export class BotCoordinator {
     kind: string,
     facts: object,
     taskId?: string,
+    goalId?: string,
   ) {
     // Coordination follows the owner's explicitly selected delivery route; colleagues keep theirs.
     const route = taskId
@@ -207,9 +225,14 @@ export class BotCoordinator {
       : undefined;
     groupId = route?.group_id ?? groupId;
     sourceId = route?.source_message_id ?? sourceId;
+    if (!taskId && goalId) {
+      const goal = this.goals.get(goalId, botId);
+      groupId = goal.groupId;
+      sourceId = goal.sourceMessageId ?? sourceId;
+    }
     this.store.db
       .prepare(
-        'INSERT OR IGNORE INTO dialogue_inbox(id,bot_id,group_id,source_message_id,task_id,kind,payload,created_at) VALUES(?,?,?,?,?,?,?,?)',
+        'INSERT OR IGNORE INTO dialogue_inbox(id,bot_id,group_id,source_message_id,task_id,kind,payload,created_at,goal_id) VALUES(?,?,?,?,?,?,?,?,?)',
       )
       .run(
         randomUUID(),
@@ -220,6 +243,7 @@ export class BotCoordinator {
         kind,
         JSON.stringify({ ...facts, sourceMessageId: sourceId }),
         new Date().toISOString(),
+        goalId ?? null,
       );
     queueMicrotask(() => this.pump());
   }
@@ -293,6 +317,12 @@ export class BotCoordinator {
     return retried;
   }
   complete(task: Task, leaseId: string) {
+    if (task.goalId)
+      this.store.db
+        .prepare(
+          "UPDATE work_goals SET unattended_checks=0 WHERE id=? AND state IN ('active','waiting')",
+        )
+        .run(task.goalId);
     this.delegations.outcome(task, leaseId);
     const current = this.processing.get(task.botId);
     if (current && this.priority(current.row) > 1) current.controller.abort('preempted');
@@ -325,8 +355,24 @@ export class BotCoordinator {
       this.notify(task.botId, task.groupId, source.source_message_id, kind, facts, task.id);
     });
     this.delegations.scan(now);
+    this.goals.scan(now, (goal, key, facts) => this.noticeGoal(goal, key, facts));
     this.maintenance.scan(now);
     this.pump();
+  }
+  private noticeGoal(goal: WorkGoal, key: string, facts: object) {
+    if (!goal.sourceMessageId) {
+      this.goals.attention(goal.id, '目标来源已不可用，需要所有者重新接续');
+      return;
+    }
+    this.notify(
+      goal.botId,
+      goal.groupId,
+      goal.sourceMessageId,
+      `objective:${key}`,
+      { ...facts, goalId: goal.id, version: goal.version, generation: goal.generation },
+      undefined,
+      goal.id,
+    );
   }
   heartbeat(taskId: string) {
     this.maintenance.heartbeat(taskId);
@@ -382,6 +428,9 @@ export class BotCoordinator {
   cancelDelegations(taskId: string) {
     this.delegations.cancel(taskId);
   }
+  stopGoal(goalId: string) {
+    return this.delegations.cancelGoal(goalId);
+  }
   private task(row: Inbox, id: string) {
     const s = this.store.snapshot();
     const task = s.tasks.find(
@@ -419,6 +468,7 @@ export class BotCoordinator {
       .groups.some((g) => g.id === row.group_id && g.botIds.includes(row.bot_id));
   }
   private chainStopped(row: Inbox) {
+    if (row.goal_id && this.goals.get(row.goal_id).state === 'cancelled') return true;
     const source = this.source(row);
     const chain = this.store.db
       .prepare('SELECT stopped FROM collaboration_chains WHERE id=?')
@@ -663,6 +713,9 @@ Maintain a durable task contract: define specific acceptance criteria when start
 Use delegate_task for actual work requested from a colleague, rather than relying on a chat @ to imply acceptance. The receiving Bot must respond_delegation to accept or reject. Inspect submitted work with read_delegation and review_delegation before treating it as delivered. Do not finish a parent while an accepted/offered/submitted delegation remains unresolved. Delegation does not grant host permissions. Plain social interaction may still use chat.
 Recall relevant old facts using recall_memory. Use remember with provenance user/inference/worker; user means explicitly stated by the human, not an inference about them. Correct outdated facts with replacesId, forget false facts with forget_memory, and give temporary facts an expiry. Do not duplicate live task states or membership as long-term facts. Preserve privacy scopes and never treat a memory as authorization.
 Local mutating execution is serialized per device. Use resourceMode=read only for investigation without writes or permission escalation; worktree creates a separate Git working copy for changes that need separate review, and exclusive changes the original resources under native permissions. A worktree result is a separate deliverable, not a change already applied to the original project. Never claim integration without checking it.
+For substantial responsibilities, first create_goal, then start_worker with goalId only when execution is needed. Goals can be accepted offline, planned, or completed entirely through delegate_goal; do not launch an unnecessary worker just to create ownership. finish_task accepts one execution; finish_goal accepts the overall responsibility. Maintain a concrete next action, a structured waitFor event, a future check or an explicit needsHuman reason. On objective events inspect current facts and advance the goal or arrange its next check; no change warrants silence. Three unattended checks escalate to a durable owner decision instead of infinite polling.
+Shared projects contain versioned confirmed requirements, decisions and interfaces. Use propose_project_fact for suggestions; confirm_project_fact only for the human's explicit new confirmation. Read the current project before planning. Each execution captures confirmed fact versions; a changed requirement invalidates older evidence. Share projects into another conversation only on the human's explicit request. Independent Bot memories remain private and must not override confirmed project records.
+For explicit goals register actual deliverables with register_artifact; inspect their manifests with read_artifact. Verification, responsible acceptance and actual application are separate states. JSON parsing proves syntax only; substantive validation should use a separate start_worker with verifyArtifactIds, actual checks, and verify_artifact with the accepted verifier run. Human verification requires a new explicit human confirmation. Never substitute a producer's success claim for an independent check. A changed artifact digest or governing fact requires new verification. record_application only observes a fixed target that already matches; it does not merge or publish. finish_goal needs current accepted artifacts or completed delegated deliveries for every criterion; delivery=applied additionally requires observed application.
 Call tools to start/query/update/stop/continue work; start_worker returns immediately. Never wait in this conversation for a worker. Avoid repeated tool calls if the state is unchanged. A final response may be empty; do not print tool JSON. Never expose task ids, leases, versions, queues or internal session names. Communicate actual progress, findings, decisions and blockers.
 ${uiCapabilityInstructions}
 Use the render tool for interactive cards. Do not invent file contents or facts to fill a card.`,
@@ -711,6 +764,64 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
                 .map((t) => ({ goal: t.execution?.goal ?? t.input, status: t.status })),
             })),
           memory: memories,
+          goals: this.goals
+            .list(bot.id, group.id)
+            .slice(0, 12)
+            .map((g) => ({
+              id: g.id,
+              title: g.title.slice(0, 1000),
+              criteriaPreview: g.criteria.slice(0, 3),
+              version: g.version,
+              state: g.state,
+              nextAction: g.nextAction,
+              nextCheckAt: g.nextCheckAt,
+              deadline: g.deadline,
+              attentionReason: g.attentionReason,
+              ownerWait: g.ownerWait,
+              delivery: g.delivery,
+              verification: g.verification,
+              projectId: g.projectId,
+            })),
+          goalRegistry: this.goals.list(bot.id).map((g) => ({
+            id: g.id,
+            title: g.title.slice(0, 800),
+            state: g.state,
+            groupId: g.groupId,
+            version: g.version,
+          })),
+          projects: s.projects
+            ?.filter((p) => p.groupIds.includes(group.id))
+            .slice(-8)
+            .map((p) => ({
+              ...p,
+              facts: this.facts
+                .current(p.id)
+                .slice(0, 8)
+                .map((f) => ({ ...f, content: f.content.slice(0, 1000) })),
+            })),
+          artifacts: s.artifacts
+            ?.filter((a) =>
+              s.goals?.some(
+                (g) =>
+                  g.id === a.goalId &&
+                  ((g.botId === bot.id && g.groupId === group.id) ||
+                    (g.projectId &&
+                      s.projects?.some(
+                        (p) => p.id === g.projectId && p.groupIds.includes(group.id),
+                      ))),
+              ),
+            )
+            .slice(-16)
+            .map((a) => ({
+              id: a.id,
+              goalId: a.goalId,
+              title: a.title,
+              kind: a.kind,
+              locator: a.locator,
+              version: a.version,
+              digest: a.digest,
+              state: a.state,
+            })),
           delegations: this.delegations.list(bot.id, group.id),
           taskRegistry: s.tasks
             .filter(
@@ -756,6 +867,7 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
             })),
           tasks: tasks.slice(-12).map((t) => ({
             id: t.id,
+            goalId: t.goalId,
             pipeline: t.execution?.pipeline,
             health: t.execution?.health,
             goal: t.execution?.goal ?? t.input,
@@ -785,15 +897,18 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
                   },
                 }
               : {
-                  kind: row.kind.startsWith('delegation:')
-                    ? 'delegation'
-                    : row.kind.startsWith('goal:')
-                      ? 'goal'
-                      : row.kind.startsWith('completion:')
-                        ? 'completion'
-                        : row.kind.startsWith('progress:')
-                          ? 'progress'
-                          : 'watchdog',
+                  kind: row.kind.startsWith('objective:')
+                    ? 'objective'
+                    : row.kind.startsWith('delegation:')
+                      ? 'delegation'
+                      : row.kind.startsWith('goal:')
+                        ? 'goal'
+                        : row.kind.startsWith('completion:')
+                          ? 'completion'
+                          : row.kind.startsWith('progress:')
+                            ? 'progress'
+                            : 'watchdog',
+                  goalId: row.goal_id,
                   taskId: row.task_id,
                   eventType: row.kind,
                   facts: row.kind.startsWith('completion:')
@@ -859,18 +974,239 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
       throw new Error('普通进度汇报只供状态维护，不触发新任务、任务变更或记忆写入');
     if (!this.active(row)) throw new Error('数字员工已离开群组');
     const source = this.source(row);
+    const humanRequest = row.kind === 'message' && source.senderType === 'human';
+    if (
+      ([
+        'confirm_project_fact',
+        'share_project',
+        'revise_goal',
+        'link_goal',
+        'reopen_goal',
+      ].includes(name) ||
+        (name === 'verify_artifact' && args.method === 'human')) &&
+      !humanRequest
+    )
+      throw new Error('此操作需要所有者在当前对话的明确要求');
     const originalTask = row.task_id ? this.task(row, row.task_id) : undefined;
     const stopped =
       this.chainStopped(row) || (row.kind !== 'message' && originalTask?.status === 'cancelled');
     if (stopped && ['start_worker', 'update_task', 'continue_task'].includes(name))
       throw new Error('这项工作已停止，不能自动重新启动');
     const task = typeof args.taskId === 'string' ? this.task(row, args.taskId) : undefined;
+    let goal =
+      typeof args.goalId === 'string'
+        ? this.goals.get(
+            args.goalId,
+            row.bot_id,
+            ['read_goal', 'link_goal'].includes(name) ? undefined : row.group_id,
+          )
+        : undefined;
+    if (
+      goal?.ownerWait &&
+      humanRequest &&
+      ['start_worker', 'delegate_goal', 'register_artifact', 'finish_goal'].includes(name)
+    ) {
+      this.goals.plan(
+        goal,
+        { nextAction: typeof args.goal === 'string' ? args.goal : goal.nextAction },
+        true,
+      );
+      this.store.db
+        .prepare('UPDATE work_goals SET source_message_id=? WHERE id=?')
+        .run(source.id, goal.id);
+      goal = this.goals.get(goal.id);
+    }
     if (
       task &&
       task.groupId !== row.group_id &&
       !['read_task', 'list_tasks', 'link_task'].includes(name)
     )
       throw new Error('先由用户在当前对话中关联这项工作，再调整、续接或验收');
+    if (name === 'create_goal')
+      return this.goals.create(
+        source,
+        row.bot_id,
+        args.title as string,
+        args.criteria as string[],
+        args as {
+          projectId?: string;
+          delivery?: 'accepted' | 'applied';
+          verification?: 'reviewed' | 'content';
+        },
+      );
+    if (name === 'list_goals') {
+      const offset = (args.offset as number | undefined) ?? 0;
+      const goals = this.goals.list(
+        row.bot_id,
+        undefined,
+        offset,
+        (args.query as string | undefined) ?? '',
+      );
+      return {
+        nextOffset: goals.length === 40 ? offset + 40 : null,
+        goals: goals.map((g) => ({
+          id: g.id,
+          title: g.title,
+          state: g.state,
+          groupId: g.groupId,
+          version: g.version,
+          nextAction: g.nextAction,
+          nextCheckAt: g.nextCheckAt,
+          attentionReason: g.attentionReason,
+        })),
+      };
+    }
+    if (name === 'read_goal')
+      return {
+        ...goal,
+        waits: this.store.db.prepare('SELECT * FROM goal_waits WHERE goal_id=?').all(goal!.id),
+        tasks: this.store.snapshot().tasks.filter((t) => t.goalId === goal!.id),
+        artifacts: this.store
+          .snapshot()
+          .artifacts?.filter((a) => a.goalId === goal!.id)
+          .map((a) => ({
+            id: a.id,
+            title: a.title,
+            version: a.version,
+            digest: a.digest,
+            state: a.state,
+            kind: a.kind,
+            locator: a.locator,
+          })),
+        acceptance: this.store.db
+          .prepare('SELECT * FROM goal_acceptance WHERE goal_id=?')
+          .all(goal!.id),
+      };
+    if (name === 'link_goal') {
+      this.goals.link(goal!, source);
+      for (const t of this.store.snapshot().tasks.filter((t) => t.goalId === goal!.id))
+        this.contracts.link(t, source);
+      return this.goals.get(goal!.id);
+    }
+    if (name === 'plan_goal') {
+      const { goalId: _id, ...plan } = args;
+      this.goals.plan(goal!, plan as GoalPlan, humanRequest);
+      if (humanRequest)
+        this.store.db
+          .prepare('UPDATE work_goals SET source_message_id=? WHERE id=?')
+          .run(source.id, goal!.id);
+      return this.goals.get(goal!.id);
+    }
+    if (name === 'revise_goal')
+      return this.goals.revise(
+        goal!,
+        args.expectedVersion as number,
+        args.criteria as string[],
+        source,
+      );
+    if (name === 'stop_goal') return this.delegations.cancelGoal(goal!.id);
+    if (name === 'reopen_goal')
+      return this.goals.reopen(
+        goal!,
+        args.expectedVersion as number,
+        args.instruction as string,
+        source,
+      );
+    if (name === 'finish_goal') {
+      const accepted = this.goals.complete(
+        goal!,
+        args.expectedVersion as number,
+        args.evidence as GoalEvidence[],
+      );
+      this.delegations.submitGoal(accepted);
+      return accepted;
+    }
+    if (name === 'delegate_goal')
+      return this.delegations.offerGoal(
+        goal!,
+        args.botId as string,
+        args.goal as string,
+        args.criteria as string[],
+        source,
+        args.expiresAt as string | undefined,
+      );
+    if (name === 'create_project') return this.facts.create(args.name as string, source);
+    if (name === 'share_project')
+      return this.facts.share(args.projectId as string, args.groupId as string, source);
+    if (name === 'read_project') return this.facts.read(args.projectId as string, row.group_id);
+    if (name === 'propose_project_fact')
+      return this.facts.propose(
+        args.projectId as string,
+        args.key as string,
+        args.content as string,
+        args.kind as string,
+        args.expectedVersion as number,
+        row.bot_id,
+        source,
+      );
+    if (name === 'confirm_project_fact')
+      return this.facts.confirm(args.factId as string, args.version as number, source);
+    if (name === 'register_artifact')
+      return this.artifacts.register(
+        row.bot_id,
+        row.group_id,
+        args as {
+          goalId: string;
+          taskId: string;
+          title: string;
+          kind: WorkArtifact['kind'];
+          locator: string;
+          applicationPath?: string;
+          artifactId?: string;
+          expectedVersion?: number;
+        },
+      );
+    if (name === 'read_artifact') {
+      const a = this.artifacts.get(args.artifactId as string);
+      this.artifacts.canRead(a, row.bot_id, row.group_id);
+      return {
+        ...a,
+        manifest: a.manifest.slice(
+          (args.offset as number | undefined) ?? 0,
+          ((args.offset as number | undefined) ?? 0) + 12000,
+        ),
+        nextOffset:
+          ((args.offset as number | undefined) ?? 0) + 12000 < a.manifest.length
+            ? ((args.offset as number | undefined) ?? 0) + 12000
+            : null,
+        checks: this.store.db
+          .prepare('SELECT * FROM artifact_checks WHERE artifact_id=? ORDER BY created_at')
+          .all(a.id),
+        history: this.store.db
+          .prepare(
+            'SELECT version,digest,created_at FROM artifact_history WHERE artifact_id=? ORDER BY version',
+          )
+          .all(a.id),
+      };
+    }
+    if (name === 'verify_artifact')
+      return this.artifacts.verify(
+        row.bot_id,
+        row.group_id,
+        source,
+        args as {
+          artifactId: string;
+          version: number;
+          method: 'json' | 'independent_run' | 'human';
+          verifierRunId?: string;
+          quote?: string;
+        },
+      );
+    if (name === 'accept_artifact')
+      return this.artifacts.accept(
+        row.bot_id,
+        row.group_id,
+        args.artifactId as string,
+        args.version as number,
+      );
+    if (name === 'record_application')
+      return this.artifacts.application(
+        row.bot_id,
+        row.group_id,
+        args.artifactId as string,
+        args.version as number,
+        source,
+      );
     if (name === 'link_task') {
       this.contracts.link(task!, source);
       return { linked: true, taskId: task!.id, deliveryGroupId: row.group_id };
@@ -913,13 +1249,33 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
         args.decision as 'accept' | 'reject',
         args.reason as string,
         () =>
-          this.hooks.create(
-            this.store.snapshot().messages.find((m) => m.id === d.source_message_id)!,
-            row.bot_id,
-            d.goal,
-            [],
-            { criteria: JSON.parse(d.criteria), silent: true },
-          ),
+          d.task_id
+            ? this.hooks.create(
+                this.store.snapshot().messages.find((m) => m.id === d.source_message_id)!,
+                row.bot_id,
+                d.goal,
+                [],
+                { criteria: JSON.parse(d.criteria), silent: true },
+              )
+            : (() => {
+                const parent = this.goals.get(d.goal_id);
+                const child = this.goals.create(
+                  this.store.snapshot().messages.find((m) => m.id === d.source_message_id)!,
+                  row.bot_id,
+                  d.goal,
+                  JSON.parse(d.criteria),
+                  {
+                    projectId: parent.projectId ?? undefined,
+                    delivery: parent.delivery,
+                    verification: parent.verification,
+                  },
+                );
+                this.noticeGoal(child, `accepted:${d.id}`, {
+                  reason: 'delegation_accepted',
+                  delegationId: d.id,
+                });
+                return child;
+              })(),
       );
     }
     if (name === 'review_delegation') {
@@ -954,6 +1310,7 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
         )
         .map((t) => ({
           id: t.id,
+          goalId: t.goalId,
           pipeline: t.execution?.pipeline,
           health: t.execution?.health,
           groupId: t.groupId,
@@ -966,6 +1323,7 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
       const result = task!.result ?? '';
       return {
         id: task!.id,
+        goalId: task!.goalId,
         groupId: task!.groupId,
         botId: task!.botId,
         input: task!.input,
@@ -995,7 +1353,7 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
         nextOffset: offset + 12000 < result.length ? offset + 12000 : null,
         runs: this.store.db
           .prepare(
-            'SELECT status,requirement_version AS version,error,started_at AS startedAt,finished_at AS finishedAt,substr(result,1,2000) AS resultPreview FROM worker_runs WHERE task_id=? ORDER BY started_at',
+            'SELECT id,status,goal_version AS goalVersion,requirement_version AS version,error,started_at AS startedAt,finished_at AS finishedAt,substr(result,1,2000) AS resultPreview FROM worker_runs WHERE task_id=? ORDER BY started_at',
           )
           .all(task!.id),
         children: this.store.db
@@ -1059,6 +1417,8 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
         silent: args.silent as boolean | undefined,
         pipelineId: args.pipelineId as string | undefined,
         criteria: args.criteria as string[] | undefined,
+        goalId: args.goalId as string | undefined,
+        verifyArtifactIds: args.verifyArtifactIds as string[] | undefined,
         resourceMode: args.resourceMode as WorkerOptions['resourceMode'],
       });
       if (!created) throw new Error('未能开始工作，请检查执行连接或协作预算');
@@ -1112,6 +1472,7 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
         | { id: string; status: string; requirement_version: number; result: string | null }
         | undefined;
       if (run?.status !== 'completed') throw new Error('没有已完成的真实执行结果');
+      this.facts.assertCurrent(run.id);
       if (
         this.store.db
           .prepare(
@@ -1136,6 +1497,22 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
       if (parent.parent_task_id)
         this.complete(this.task(row, parent.parent_task_id), `child:${task!.id}:${run.id}`);
       this.delegations.submit(this.task(row, task!.id));
+      if (task!.goalId) {
+        const g = this.goals.get(task!.goalId);
+        if (g.legacy)
+          this.store.db
+            .prepare(
+              "UPDATE work_goals SET state='completed',result=?,next_check_at=NULL,updated_at=? WHERE id=? AND state!='cancelled'",
+            )
+            .run(task!.result, new Date().toISOString(), g.id);
+        else {
+          this.goals.reconcile(g.id);
+          this.noticeGoal(this.goals.get(g.id), `task:${run.id}`, {
+            reason: 'execution_accepted',
+            taskId: task!.id,
+          });
+        }
+      }
       return { taskId: task!.id, status: 'completed' };
     }
     if (name === 'remember') {
@@ -1148,6 +1525,13 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
     if (name === 'render') return this.hooks.render(source, row.bot_id, args.document);
   }
   private currentProgress(row: Inbox) {
+    if (row.kind.startsWith('objective:') && row.goal_id) {
+      const goal = this.goals.get(row.goal_id);
+      return (
+        goal.state !== 'cancelled' &&
+        goal.version === (JSON.parse(row.payload) as { version: number }).version
+      );
+    }
     if (row.kind.startsWith('goal:')) {
       const current = this.store.db
         .prepare('SELECT generation,state FROM task_contracts WHERE task_id=?')
@@ -1397,6 +1781,8 @@ Use the render tool for interactive cards. Do not invent file contents or facts 
             this.publish(row, '刚才没能完成这轮处理，已开始的工作记录仍然保留。');
         }
       })();
+    } finally {
+      for (const goal of this.goals.list(row.bot_id, row.group_id)) this.goals.reconcile(goal.id);
     }
   }
   async close() {
