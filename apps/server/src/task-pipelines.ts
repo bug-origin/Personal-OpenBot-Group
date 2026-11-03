@@ -20,7 +20,12 @@ export class TaskPipelines {
         if (
           !pipeline ||
           pipeline.bot_id !== task.botId ||
-          pipeline.group_id !== task.groupId ||
+          (pipeline.group_id !== task.groupId &&
+            !this.store.db
+              .prepare(
+                'SELECT 1 FROM task_conversations c JOIN task_pipeline_bindings b ON b.task_id=c.task_id WHERE b.pipeline_id=? AND c.group_id=?',
+              )
+              .get(id, task.groupId)) ||
           pipeline.archived_at
         )
           throw new Error('工作管道不存在、已归档或不属于当前数字员工与对话');

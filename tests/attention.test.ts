@@ -212,7 +212,11 @@ it('bypasses attention for own completion and progress events, including result 
     if (messages.at(-1)?.role === 'tool') return empty();
     const data = context(messages);
     if (data.event.kind === 'completion')
-      return call('finish_task', { taskId: data.event.taskId, verification: '已核对真实结果' });
+      return call('finish_task', {
+        taskId: data.event.taskId,
+        verification: '已核对真实结果',
+        evidence: [{ criterion: '只读验证', source: 'result', quote: '实际证据' }],
+      });
     if (data.event.kind === 'watchdog') return empty();
     return call('start_worker', { goal: '只读验证' });
   }, attention);

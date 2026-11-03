@@ -86,6 +86,23 @@ process.on('SIGINT',()=>{});process.on('SIGTERM',()=>{});setInterval(()=>{},1000
   };
   return { directory, executable, requests, job };
 }
+it('denies Claude writes from a read-only assignment before requesting owner approval', async () => {
+  const f = fixture('permission');
+  f.job.resourceMode = 'read';
+  const execution = new ClaudeExecution(f.executable, f.job, {
+    session: () => {},
+    progress: () => {},
+    approval: () => {},
+    interaction: () => {
+      throw new Error('read-only escalation');
+    },
+  });
+  expect((await execution.run()).status).toBe('completed');
+  expect(JSON.parse(readFileSync(f.requests, 'utf8')).response.response).toMatchObject({
+    behavior: 'deny',
+  });
+});
+
 it('requires host approval for writes, confirms the real input, keeps thinking private and returns the terminal result', async () => {
   const f = fixture();
   const sessions: string[] = [],

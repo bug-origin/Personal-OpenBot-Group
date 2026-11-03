@@ -42,7 +42,11 @@ async function setup(model?: CoordinatorModel) {
         return d.event.kind === 'message'
           ? call('start_worker', { goal: '删除验收' })
           : d.event.kind === 'completion'
-            ? call('finish_task', { taskId: d.event.taskId, verification: '实际结果已检查' })
+            ? call('finish_task', {
+                taskId: d.event.taskId,
+                verification: '实际结果已检查',
+                evidence: [{ criterion: '删除验收', source: 'result', quote: '实际处理已完成' }],
+              })
             : empty();
       }),
   });
@@ -116,26 +120,12 @@ it('atomically deletes group history and execution records while preserving Bots
   expect(instance.store.snapshot().tasks[0].status).toBe('completed');
   const db = instance.store.db;
   const now = new Date().toISOString();
-  db.prepare('INSERT INTO bot_memory VALUES(?,?,?,?,?,?,?,?)').run(
-    'global',
-    botId,
-    null,
-    'bot',
-    'preference',
-    '长期偏好',
-    message.id,
-    now,
-  );
-  db.prepare('INSERT INTO bot_memory VALUES(?,?,?,?,?,?,?,?)').run(
-    'local',
-    botId,
-    groupId,
-    'group',
-    'context',
-    '群内事实',
-    message.id,
-    now,
-  );
+  db.prepare(
+    'INSERT INTO bot_memory(id,bot_id,group_id,scope,key,content,source_message_id,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+  ).run('global', botId, null, 'bot', 'preference', '长期偏好', message.id, now);
+  db.prepare(
+    'INSERT INTO bot_memory(id,bot_id,group_id,scope,key,content,source_message_id,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+  ).run('local', botId, groupId, 'group', 'context', '群内事实', message.id, now);
   db.prepare('INSERT INTO conversation_memory VALUES(?,?,?,?)').run(
     botId,
     groupId,

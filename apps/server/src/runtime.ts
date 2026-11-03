@@ -23,6 +23,8 @@ import { BotCoordinator, type WorkerOptions } from './bot-coordinator.js';
 import type { CoordinatorModel } from './coordinator-model.js';
 import type { AttentionModel } from './attention-model.js';
 import { TaskPipelines } from './task-pipelines.js';
+import { TaskContracts } from './task-contracts.js';
+import { TaskResources } from './task-resources.js';
 type Link = { info: BridgeInfo; send: (command: BridgeCommand) => void; close: () => void };
 export class Runtime {
   private links = new Map<string, Link>();
@@ -39,6 +41,8 @@ export class Runtime {
   readonly ui: UiService;
   readonly native: NativeRequests;
   private pipelines: TaskPipelines;
+  private contracts: TaskContracts;
+  private resources: TaskResources;
   constructor(
     private store: Store,
     private changed: () => void,
@@ -51,6 +55,8 @@ export class Runtime {
   ) {
     this.maxRounds = maxRounds;
     this.pipelines = new TaskPipelines(store);
+    this.contracts = new TaskContracts(store);
+    this.resources = new TaskResources(store);
     this.ui = new UiService(store, changed, (message) => this.accept(message));
     this.native = new NativeRequests(store, changed, (taskId, leaseId, requestId, response) => {
       const botId = this.store.snapshot().tasks.find((t) => t.id === taskId)?.botId;
@@ -551,6 +557,10 @@ export class Runtime {
       this.store.db
         .prepare('INSERT INTO task_runtime(task_id,source_message_id) VALUES(?,?)')
         .run(id, message.id);
+      this.store.db.prepare('INSERT INTO task_routes VALUES(?,?,?)').run(id, group.id, message.id);
+      this.store.db
+        .prepare('INSERT INTO task_conversations VALUES(?,?,?,?)')
+        .run(id, group.id, message.id, new Date().toISOString());
       if (this.coordinator) {
         let resource = '*';
         if (options?.resourceKey && isAbsolute(options.resourceKey)) {
@@ -564,7 +574,7 @@ export class Runtime {
         }
         this.store.db
           .prepare(
-            'INSERT INTO task_workers(task_id,provider,resource_key,parent_task_id,silent) VALUES(?,?,?,?,?)',
+            'INSERT INTO task_workers(task_id,provider,resource_key,parent_task_id,silent,resource_mode) VALUES(?,?,?,?,?,?)',
           )
           .run(
             id,
@@ -572,6 +582,7 @@ export class Runtime {
             resource,
             options?.parentTaskId ?? null,
             options?.silent ? 1 : 0,
+            options?.resourceMode ?? 'exclusive',
           );
       }
       if (this.conversations) {
@@ -606,6 +617,11 @@ export class Runtime {
       if (this.coordinator) {
         const task = this.store.snapshot().tasks.find((t) => t.id === id)!;
         this.pipelines.assign(task, goal ?? message.content, options?.pipelineId);
+        this.contracts.plan(
+          task,
+          { criteria: options?.criteria?.length ? options.criteria : [goal ?? message.content] },
+          false,
+        );
       }
     }
     this.store.db
@@ -631,7 +647,21 @@ export class Runtime {
         const provider = worker?.provider ?? bot.provider;
         if (!this.ready(bot, provider)) continue;
         if (worker && this.pipelines.busy(task.id)) continue;
+        if (this.coordinator && !this.contracts.canRun(task.id)) {
+          this.store.db
+            .prepare(
+              "UPDATE tasks SET status='failed',error='任务已达到执行预算，需要用户明确调整计划',finished_at=? WHERE id=?",
+            )
+            .run(new Date().toISOString(), task.id);
+          this.conversations?.complete(
+            this.store.snapshot().tasks.find((t) => t.id === task.id)!,
+            `budget:${randomUUID()}`,
+          );
+          this.changed();
+          continue;
+        }
         const active = s.tasks.filter((t) => ['running', 'cancelling'].includes(t.status));
+        if (this.coordinator && this.resources.writerBusy(task, active)) continue;
         if (
           active.filter((t) => t.botId === bot.id).length >=
           (this.coordinator ? this.workerLimits.perBot : 1)
@@ -644,6 +674,8 @@ export class Runtime {
           if (onDevice.length >= this.workerLimits.perBridge) continue;
           const resource = worker?.resource_key ?? '*';
           const conflict = onDevice.some((t) => {
+            if (this.resources.mode(task.id) === 'read' && this.resources.mode(t.id) === 'read')
+              return false;
             const other = this.store.db
               .prepare('SELECT resource_key FROM task_workers WHERE task_id=?')
               .get(t.id) as { resource_key: string } | undefined;
@@ -673,6 +705,27 @@ export class Runtime {
         const meta = this.store.db
           .prepare('SELECT source_message_id AS sourceMessageId FROM task_runtime WHERE task_id=?')
           .get(task.id) as { sourceMessageId: string };
+        if (this.coordinator) {
+          try {
+            this.resources.prepare(task);
+          } catch (error) {
+            this.store.db
+              .prepare("UPDATE tasks SET status='failed',error=?,finished_at=? WHERE id=?")
+              .run(
+                error instanceof Error && error.message.includes('工作')
+                  ? error.message.slice(0, 300)
+                  : '无法建立独立工作副本，请核实 Git 项目与本地权限',
+                new Date().toISOString(),
+                task.id,
+              );
+            this.conversations?.complete(
+              this.store.snapshot().tasks.find((t) => t.id === task.id)!,
+              `workspace:${randomUUID()}`,
+            );
+            this.changed();
+            continue;
+          }
+        }
         const spec = this.store.db
           .prepare('SELECT * FROM task_specs WHERE task_id=?')
           .get(task.id) as
@@ -776,6 +829,7 @@ export class Runtime {
           session: session ?? null,
           sourceMessageId: meta.sourceMessageId,
           acceptedVersion: delivery?.accepted_version ?? (spec ? 0 : session ? 1 : 0),
+          ...(this.coordinator ? { resourceMode: this.resources.mode(task.id) } : {}),
         };
         try {
           this.links.get(bot.bridgeId!)!.send({ type: 'run', job });
@@ -961,6 +1015,7 @@ export class Runtime {
       return;
     }
     if (event.type !== 'result') return;
+    if (this.coordinator) this.resources.inspect(task.id);
     if (this.coordinator)
       this.store.db
         .prepare('UPDATE worker_runs SET status=?,result=?,error=?,finished_at=? WHERE id=?')
@@ -1226,6 +1281,17 @@ export class Runtime {
       message.groupId !== task.groupId
     )
       throw Object.assign(new Error('当前无法继续这段工作，请确认最新状态'), { statusCode: 409 });
+    if (this.coordinator) {
+      const contract = this.store.db
+        .prepare(
+          'SELECT max_runs,(SELECT count(*) FROM worker_runs WHERE task_id=?) AS runs FROM task_contracts WHERE task_id=?',
+        )
+        .get(id, id) as { max_runs: number; runs: number };
+      if (contract.runs >= contract.max_runs)
+        throw Object.assign(new Error('任务已达到执行预算，需要用户明确调整计划'), {
+          statusCode: 409,
+        });
+    }
     const bot = this.store.snapshot().bots.find((b) => b.id === task.botId)!;
     const spec = this.store.db
       .prepare('SELECT thread_id FROM task_specs WHERE task_id=?')
@@ -1288,6 +1354,16 @@ export class Runtime {
         .prepare('UPDATE task_runtime SET source_message_id=?,lease_id=NULL WHERE task_id=?')
         .run(message.id, id);
       this.store.db
+        .prepare(
+          'INSERT INTO task_routes VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET group_id=excluded.group_id,source_message_id=excluded.source_message_id',
+        )
+        .run(id, message.groupId, message.id);
+      this.store.db
+        .prepare(
+          "UPDATE task_contracts SET state='active',next_wake_at=NULL,generation=generation+1,updated_at=? WHERE task_id=?",
+        )
+        .run(new Date().toISOString(), id);
+      this.store.db
         .prepare('UPDATE collaboration_chains SET calls=calls+1 WHERE id=?')
         .run(message.correlationId);
     })();
@@ -1329,6 +1405,7 @@ export class Runtime {
   }
   stopTask(id: string) {
     const task = this.taskStatus(id).task;
+    if (this.conversations instanceof BotCoordinator) this.conversations.cancelDelegations(id);
     this.store.db
       .prepare('UPDATE task_workers SET stopped=1 WHERE task_id=? OR parent_task_id=?')
       .run(id, id);
@@ -1411,6 +1488,9 @@ export class Runtime {
     const chain = this.store.db.prepare('SELECT id FROM collaboration_chains WHERE id=?').get(id);
     if (!chain) throw Object.assign(new Error('协作链不存在'), { statusCode: 404 });
     this.store.db.prepare('UPDATE collaboration_chains SET stopped=1 WHERE id=?').run(id);
+    if (this.conversations instanceof BotCoordinator)
+      for (const task of this.store.snapshot().tasks.filter((t) => t.correlationId === id))
+        this.conversations.cancelDelegations(task.id);
     this.store.db
       .prepare(
         'UPDATE task_workers SET stopped=1 WHERE task_id IN (SELECT id FROM tasks WHERE correlation_id=?)',

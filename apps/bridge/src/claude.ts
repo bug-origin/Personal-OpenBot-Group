@@ -139,6 +139,16 @@ export class ClaudeExecution implements AgentExecution {
         return;
       }
       if (this.interactions.has(id)) return;
+      if (
+        this.job.resourceMode === 'read' &&
+        !['Read', 'Glob', 'Grep', 'AskUserQuestion'].includes(request.tool_name)
+      ) {
+        this.controlReply(id, {
+          behavior: 'deny',
+          message: '本次工作仅允许读取和提问，需要修改时应由 Bot 另行安排独占执行。',
+        });
+        return;
+      }
       const input = structuredClone(request.input ?? {}),
         spec = claudeRequest(request.tool_name, input, request.decision_reason);
       this.interactions.set(id, { tool: request.tool_name, input, spec });
@@ -201,7 +211,9 @@ export class ClaudeExecution implements AgentExecution {
         '--mcp-config',
         '{"mcpServers":{}}',
         '--tools',
-        'Read,Glob,Grep,Bash,Edit,Write,AskUserQuestion',
+        this.job.resourceMode === 'read'
+          ? 'Read,Glob,Grep,AskUserQuestion'
+          : 'Read,Glob,Grep,Bash,Edit,Write,AskUserQuestion',
         '--allowedTools',
         'Read,Glob,Grep',
         '--permission-mode',
@@ -225,7 +237,7 @@ export class ClaudeExecution implements AgentExecution {
       delete env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN;
       delete env.CLAUDE_CODE_FORWARD_SUBAGENT_TEXT;
       this.process = spawn(this.executable, args, {
-        cwd: homedir(),
+        cwd: this.job.task.execution?.workspace?.path ?? homedir(),
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: process.platform !== 'win32',

@@ -14,7 +14,9 @@
 
 人类群消息事务性投递到每位成员的持久收件箱；Bot 群消息也投递给其他成员，单聊仅投递给关联 Bot。每个 Bot 全局串行消费事件，不同 Bot 并行。普通群消息先经独立无工具的注意力模型，仅返回 `{"wake":true}` 或 `{"wake":false}`，false 不进入主会话、不发言或写记忆；私聊、直接 @、回复自己及本人任务事件绕过判断。已唤醒的主会话仍可保持安静。Bot 可互相 @ 请求协助或回传结果，实际唤醒计入持久预算并限制回复深度，避免循环。判断失败有限重试并保留可重试错误，不能伪装成忽略或默认放行。
 
-DeepSeek 使用 Chat Completions 的 Function Calling，当前关闭思考模式。平台提供 start_worker、list_tasks、read_task、read_message、update_task、continue_task、stop_task、finish_task、remember、render。主会话没有文件系统、shell 或授权能力。每次 start_worker 立即返回，任务的原生执行不阻塞对话。
+DeepSeek 使用 Chat Completions 的 Function Calling，当前关闭思考模式。平台提供任务执行、计划、跨对话接续、同事委托、证据验收和记忆治理工具。主会话没有文件系统、shell 或授权能力。每次 start_worker 立即返回，任务的原生执行不阻塞对话。
+
+同一 Bot 的状态提交保持串行，收件箱按优先级处理：直接人类指令、执行完成、普通人类消息／明确阻塞、委托、其他复核、普通进展。高优先级人类指令可中断正在等待的后台模型请求；被中断事件重新排队，已提交工具结果复用，过期进度丢弃。这里中断的是协调判断，不会取消实际 Worker。
 
 coordinator_turns 保存每个事件的上下文、模型答复、调用轮数和处理状态。执行工具前先保存模型请求；工具副作用和 coordinator_calls 的结果在同一 SQLite 事务中提交。中断后先回收已提交结果，避免重新启动同一工作。最终对外回复与事件确认也在同一事务中提交。
 
@@ -24,15 +26,29 @@ coordinator_turns 保存每个事件的上下文、模型答复、调用轮数�
 
 tasks 表示持续目标，task_specs 与 task_changes 保存要求；task_workers 保存执行选择、资源占用、父任务和验收状态。worker_runs 按 lease 保存每次执行的 Provider、设备、原生会话、要求版本、真实输出和结束状态。
 
-同一 Bot 默认最多 2 个执行，同一设备最多 4 个；可通过 OPENBOT_WORKERS_PER_BOT 和 OPENBOT_WORKERS_PER_DEVICE 配置。明确且互不包含的资源路径允许并行；相同路径、父子路径以及未知资源采用串行，保守避免已知共享环境冲突。这是调度级占用声明，不是文件系统隔离或跨进程文件锁。Worker 必须遵守分配的资源边界；并行 worktree 和合入队列仍未实现。
+同一 Bot 默认最多 2 个执行，同一设备最多 4 个；可通过 OPENBOT_WORKERS_PER_BOT 和 OPENBOT_WORKERS_PER_DEVICE 配置。resourceMode 分为 read、exclusive、worktree。设备上的写执行保守串行，即使声明不同目录也不能同时写；未知执行保留其写占用，直到所有者明确核实原任务。只读执行不占写名额，同一路径的只读任务可以并行，Bridge 拒绝其写入、命令和提权请求。原生只读沙箱仍可能运行沙箱允许的只读命令，不将它描述为禁止一切命令。
 
-每项任务先分配持久工作管道。管道表示一段持续工作的上下文，由 Bot 与当前对话共同拥有；相同目录或相近技能不能作为复用依据。同一任务调整或返工使用 update_task / continue_task；明确相关的下一项任务可以通过 start_worker 的 pipelineId 复用管道，独立目标默认新建。平台拒绝跨 Bot、跨对话或已归档管道，未核实的未知执行不能通过另建任务绕过。
+worktree 要求指定干净的 Git 项目，平台按管道创建独立 detached 工作副本，并将原生 cwd 指向副本。结果保留副本位置、基础提交、真实差异和未跟踪文件清单，不自动合入原项目，也不自动删除交付副本。原生审批仍然适用；cwd 和 worktree 并不构成完整文件系统沙箱。外部程序的并发写入、自动合入与冲突解决不在当前资源占用协议内。
+
+每项任务先分配持久工作管道。管道表示一段持续工作的上下文，由 Bot 负责；相同目录或相近技能不能作为复用依据。同一任务调整或返工使用 update_task / continue_task；明确相关的下一项任务可以通过 start_worker 的 pipelineId 复用管道，独立目标默认新建。平台拒绝跨 Bot、未关联对话或已归档管道，未核实的未知执行不能通过另建任务绕过。
+
+task_conversations 记录显式关联，task_routes 选择唯一结果投递位置。所有者在当前群或私聊要求接续后，Bot 用 link_task 关联自己的已有任务；改变要求与验收必须在当前投递对话中进行。关联不创建重复执行，不复制其他对话的聊天，也不把结果广播给所有关联群。原生会话和任务负责人保持连续。当前版本为本机单所有者授权，不能直接视为多人群的访问控制。
 
 task_pipelines 与 task_pipeline_bindings 保存管道和任务归属，pipeline_sessions 按管道、Provider、设备保存原生会话。同一管道一次只执行一项工作，待验收期间仍占用管道；完成验收才放行下一项任务。不同管道仍受设备容量和资源占用约束。
 
 同一任务可以跨多次 Worker 执行接力。同 Provider、同设备恢复对应原生会话；首次切换 Provider 时新建会话，显式附带目标、上一轮产物和新要求，切换回来仍能恢复该 Provider 原有会话。原生会话历史不跨 Provider 复用。管道中的新任务必须完整发送本次要求，不能套用上一任务的要求接收游标。父任务可以创建支持性子任务，子任务未完成验收时不能接受父任务；子任务通过验收后会通知父任务协调者。
 
-Worker 返回完成时，目标进入 reviewing。主会话比较最新要求与实际证据，调用 finish_task 验收，或 continue_task 安排后续处理。原生结果原样保存在执行记录中，对外答复由 Bot 统一组织；模型不可凭空声称通过测试或完成修改。
+task_contracts 保存验收条件、下一行动、等待条件、下次检查、截止时间、执行预算和计划代次。新目标默认以工作说明作为验收项，实质工作应给出明确 criteria。plan_task 维护计划；到期只产生一次持久复核事件，不直接执行、重放未知操作或恢复停止工作。截止提醒独立于下次检查时间。默认每任务最多 12 次执行，增加预算必须来自新的人类请求。
+
+Worker 返回完成时，目标进入 reviewing。主会话比较最新要求与实际证据，调用 finish_task 验收，或 continue_task 安排后续处理。每个验收项必须引用本次执行结果、同一租约汇报或已验收委托的真实文本，记录到 task_acceptance；旧要求版本和虚构引用不能验收。文本可追溯不等于结论一定正确，Bot 仍需按目标安排产物检查或独立验证。原生结果原样保存在执行记录中，对外答复由 Bot 统一组织。
+
+## 同事委托与记忆
+
+bot_delegations 是同事之间的协作账本，没有群级决策者。delegate_task 提出目标、验收条件和期限；接收 Bot 用 respond_delegation 明确接受或拒绝，接受后创建自己负责的任务。协作方验收自己的执行后提交，发起方通过 read_delegation 和 review_delegation 接受或退回返工；父任务必须先解决所有尚在进行的委托才可验收。禁止同一委托链回委托给上游，限制同时待处理委托数量，并继承现有执行预算。
+
+停止父任务递归撤销委托并停止下游；协作方停止自己的任务立即通知发起方，执行失败也通知发起方核实。期限到达时持久记录过期并请求停止下游，不把停止请求等同于执行已终止。父任务转到私聊后，其委托结果与复核沿已授权投递路线回到父负责人，协作方保留自己的工作对话。
+
+BotMemory 在 SQLite 中按当前问题检索相关旧事实，兼顾重要性与近期性；recall_memory 可主动检索。remember 保存 user、inference、worker 来源与有效期，精确重复内容合并；replacesId 明确更正，forget_memory 失效并保留修订记录。推断不能静默覆盖用户明确事实。群内记忆不跨群读取或更正；Bot 级记忆由本人共享。任务状态与成员归属读取实时业务数据，不复制成长期事实。当前为词项检索和显式纠错，未实现语义去重或自动裁决事实冲突。
 
 ## 停止与恢复
 
@@ -50,8 +66,8 @@ Worker 的公开 commentary 和结构化 progress / milestone / blocked 汇报�
 
 ## 兼容与验证
 
-010_bot_coordinators.sql 与 011_empty_start.sql 扩展现有 SQLite；只有未经使用的旧默认群会被移除，其他 Bot、消息、任务、摘要和原生会话历史均保留。012_bot_attention.sql 保存独立注意力判断与 Bot 唤醒预算。013_task_pipelines.sql 增加工作管道、原生会话映射、任务健康与 Worker 汇报，将历史协调任务分别迁入独立管道并保留原生会话，不合并无关历史。
+010_bot_coordinators.sql 与 011_empty_start.sql 扩展现有 SQLite；只有未经使用的旧默认群会被移除，其他 Bot、消息、任务、摘要和原生会话历史均保留。012_bot_attention.sql 保存独立注意力判断与 Bot 唤醒预算。013_task_pipelines.sql 增加工作管道、原生会话映射、任务健康与 Worker 汇报，将历史协调任务分别迁入独立管道并保留原生会话，不合并无关历史。014_durable_work.sql 增加任务契约、证据、对话关联、委托、记忆修订和工作副本记录；升级保留既有数据，历史任务兼容原有验收条件。
 
 旧群路由／单次 JSON 对话接口仅保留供兼容和回归验证，默认桌面与源码入口使用每 Bot 的协调模型。人类所有者与群内 Bot 是独立身份；失败的 Bot 收件箱可单独重试，不重放其他 Bot 的回复。主会话模型可在运行时选择 DeepSeek、OpenAI-compatible 提供商或 Anthropic 原生工具协议，密钥单独保存在本机权限受限文件中。未配置模型时仍支持旧的明确 @ 本地执行方式。
 
-自动测试：tests/coordinator.test.ts、tests/attention.test.ts、tests/task-lifecycle.test.ts。生命周期测试覆盖管道归属、串行与验收释放、不同 Provider 会话、重启恢复、未知结果保护、心跳与进展区分、汇报去重及静默和进度／完成竞态。真实只读链路验证：scripts/smoke-coordinator.mjs、scripts/smoke-attention.mjs。运行真实验证会使用已配置模型和本机 Provider，独立数据库及资源文件在临时目录中创建并清理。
+自动测试覆盖协调、注意力、生命周期，以及 tests/durable-work.test.ts 和 tests/durable-migration.test.ts 中的持续目标、跨对话委托、证据、到期检查、抢占、真实 worktree 和旧数据升级。原生协议测试验证只读执行拒绝写申请。真实只读链路验证：scripts/smoke-coordinator.mjs、scripts/smoke-attention.mjs。运行真实验证会使用已配置模型和本机 Provider，独立数据库及资源文件在临时目录中创建并清理。

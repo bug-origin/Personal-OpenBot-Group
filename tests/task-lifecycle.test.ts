@@ -16,13 +16,29 @@ let commands: BridgeCommand[] = [];
 let requests = new Map<string, object>();
 let model: ReturnType<typeof vi.fn<CoordinatorModel>>;
 const empty = (): CoordinatorMessage => ({ role: 'assistant', content: '' });
-const call = (name: string, args: object): CoordinatorMessage => ({
-  role: 'assistant',
-  content: null,
-  tool_calls: [
-    { id: randomUUID(), type: 'function', function: { name, arguments: JSON.stringify(args) } },
-  ],
-});
+const call = (name: string, args: object): CoordinatorMessage => {
+  if (name === 'finish_task' && !('evidence' in args)) {
+    const task = instance?.store
+      .snapshot()
+      .tasks.find((t) => t.id === (args as { taskId: string }).taskId);
+    args = {
+      ...args,
+      evidence:
+        task?.execution?.contract?.criteria.map((criterion) => ({
+          criterion,
+          source: 'result',
+          quote: task.result?.slice(0, 1000) ?? '',
+        })) ?? [],
+    };
+  }
+  return {
+    role: 'assistant',
+    content: null,
+    tool_calls: [
+      { id: randomUUID(), type: 'function', function: { name, arguments: JSON.stringify(args) } },
+    ],
+  };
+};
 const data = (messages: CoordinatorMessage[]) => JSON.parse(messages[1].content!);
 const jobs = () =>
   commands.filter((c): c is { type: 'run'; job: AgentJob } => c.type === 'run').map((c) => c.job);

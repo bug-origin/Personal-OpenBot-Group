@@ -65,6 +65,7 @@ export interface Message {
 export interface Task {
   id: string;
   groupId: string;
+  originGroupId?: string;
   botId: string;
   input: string;
   status: TaskStatus;
@@ -78,6 +79,16 @@ export interface Task {
   execution?: TaskExecution;
 }
 export interface TaskExecution {
+  contract?: {
+    criteria: string[];
+    nextAction: string;
+    waitCondition: string | null;
+    nextWakeAt: string | null;
+    deadline: string | null;
+    maxRuns: number;
+    state: string;
+  };
+  workspace?: { root: string; path: string; baseCommit: string; review: string | null };
   pipeline?: { id: string; title: string };
   health?: {
     state: string;
@@ -162,6 +173,7 @@ export interface AgentJob {
   session: { threadId: string; lastMessageId: string | null } | null;
   sourceMessageId: string;
   acceptedVersion?: number;
+  resourceMode?: 'read' | 'exclusive' | 'worktree';
 }
 export interface NativeQuestion {
   id: string;

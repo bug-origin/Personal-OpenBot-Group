@@ -204,7 +204,7 @@ it('migrates legacy bindings without losing identities, history, or native sessi
       ).not.toContain('working_directory');
       expect(
         store.db.prepare('SELECT version FROM schema_migrations ORDER BY version').all(),
-      ).toHaveLength(13);
+      ).toHaveLength(14);
     } finally {
       store.db.close();
     }

@@ -21,6 +21,7 @@ export function createStore(path: string) {
     '011_empty_start.sql',
     '012_bot_attention.sql',
     '013_task_pipelines.sql',
+    '014_durable_work.sql',
   ]) {
     const hasHistory = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'")
@@ -86,11 +87,41 @@ export function createStore(path: string) {
         'SELECT state,detail,last_activity_at AS lastActivityAt,last_heartbeat_at AS lastHeartbeatAt,observed_at AS observedAt FROM task_health WHERE task_id=?',
       )
       .get(taskId) as TaskExecution['health'];
+    const contract = db.prepare('SELECT * FROM task_contracts WHERE task_id=?').get(taskId) as
+      | {
+          criteria: string;
+          next_action: string;
+          wait_condition: string | null;
+          next_wake_at: string | null;
+          deadline: string | null;
+          max_runs: number;
+          state: string;
+        }
+      | undefined;
+    const workspace = db
+      .prepare(
+        'SELECT w.root,w.path,w.base_commit AS baseCommit,w.review FROM pipeline_workspaces w JOIN task_pipeline_bindings b ON b.pipeline_id=w.pipeline_id WHERE b.task_id=?',
+      )
+      .get(taskId) as TaskExecution['workspace'];
     return {
       ...spec,
       ...worker,
       pipeline,
       health,
+      ...(workspace ? { workspace } : {}),
+      ...(contract
+        ? {
+            contract: {
+              criteria: JSON.parse(contract.criteria),
+              nextAction: contract.next_action,
+              waitCondition: contract.wait_condition,
+              nextWakeAt: contract.next_wake_at,
+              deadline: contract.deadline,
+              maxRuns: contract.max_runs,
+              state: contract.state,
+            },
+          }
+        : {}),
       pendingChange: pending ?? null,
       changes: all<TaskExecution['changes'][number]>(
         "SELECT version,instruction,created_at AS createdAt FROM task_changes WHERE task_id=? AND status IN ('ready','accepted') ORDER BY version",
@@ -162,7 +193,7 @@ export function createStore(path: string) {
         };
       }),
       tasks: all<Task>(
-        'SELECT id, group_id AS groupId, bot_id AS botId, input, status, created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt, result, error, correlation_id AS correlationId, round FROM tasks ORDER BY created_at',
+        'SELECT t.id, COALESCE(r.group_id,t.group_id) AS groupId, t.group_id AS originGroupId, bot_id AS botId, input, status, created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt, result, error, correlation_id AS correlationId, round FROM tasks t LEFT JOIN task_routes r ON r.task_id=t.id ORDER BY created_at',
       ).map((t) => ({ ...t, execution: execution(t.id) })),
       conversations: all(
         "SELECT DISTINCT bot_id AS botId,group_id AS groupId,status FROM dialogue_inbox WHERE status IN ('queued','processing')",

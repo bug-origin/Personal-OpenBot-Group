@@ -20,6 +20,20 @@ function reply(content = ''): CoordinatorMessage {
   return { role: 'assistant', content };
 }
 function call(name: string, args: object, id = randomUUID()): CoordinatorMessage {
+  if (name === 'finish_task' && !('evidence' in args)) {
+    const task = instance?.store
+      .snapshot()
+      .tasks.find((t) => t.id === (args as { taskId: string }).taskId);
+    args = {
+      ...args,
+      evidence:
+        task?.execution?.contract?.criteria.map((criterion) => ({
+          criterion,
+          source: 'result',
+          quote: task.result?.slice(0, 1000) ?? '',
+        })) ?? [],
+    };
+  }
   return {
     role: 'assistant',
     content: null,
@@ -260,6 +274,7 @@ it('starts work without exposing execution provider choices and accepts only rev
     if (data.event.message.content === '聊一下') return reply('可以，执行中的工作会继续。');
     return call('start_worker', {
       goal: data.event.message.content,
+      resourceMode: 'read',
       resourceKey:
         data.event.message.content === 'A' ? '/tmp/openbot-project-a' : '/tmp/openbot-project-b',
     });

@@ -109,6 +109,13 @@ export class CodexExecution {
             changes: item.changes,
           });
           if (spec) {
+            if (this.job.resourceMode === 'read' && spec.kind !== 'question') {
+              this.send({
+                id: message.id,
+                result: codexReply(message.method, params, spec, { decision: 'decline' }),
+              });
+              return;
+            }
             const key = String(message.id);
             if (this.interactions.has(key)) return;
             this.interactions.set(key, {
@@ -135,6 +142,10 @@ export class CodexExecution {
             ? 'file'
             : null;
       if (kind && !this.cancelled) {
+        if (this.job.resourceMode === 'read') {
+          this.send({ id: message.id, result: { decision: 'decline' } });
+          return;
+        }
         const key = String(message.id);
         this.approvals.set(key, message.id);
         this.callbacks.approval(key, kind, {
@@ -330,6 +341,9 @@ export class CodexExecution {
       const result = await this.request(this.job.session ? 'thread/resume' : 'thread/start', {
         ...policy,
         developerInstructions: botInstructions(this.job),
+        ...(this.job.task.execution?.workspace
+          ? { cwd: this.job.task.execution.workspace.path }
+          : {}),
         ...(this.job.session ? { threadId: this.job.session.threadId, excludeTurns: true } : {}),
       });
       if (this.job.session && result.thread.id !== this.job.session.threadId)
@@ -344,6 +358,9 @@ export class CodexExecution {
       const started = await this.request('turn/start', {
         threadId: this.threadId,
         input: [{ type: 'text', text }],
+        ...(this.job.task.execution?.workspace
+          ? { cwd: this.job.task.execution.workspace.path }
+          : {}),
         approvalPolicy: 'on-request',
         approvalsReviewer: 'user',
       });

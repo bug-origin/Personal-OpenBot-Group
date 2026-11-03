@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentJob, BridgeCommand } from '@openbot/shared';
 import { createApp } from '../../apps/server/src/app';
+import { TaskContracts } from '../../apps/server/src/task-contracts';
 
 test('shows task health in activity records while worker reports stay out of chat', async ({
   page,
@@ -87,6 +88,15 @@ test('shows task health in activity records while worker reports stay out of cha
       .toEqual({ n: 0 });
     expect(instance.store.snapshot().tasks[0].execution!.health!.state).toBe('blocked');
     expect(instance.store.snapshot().messages).toHaveLength(1);
+    new TaskContracts(instance.store).plan(
+      instance.store.snapshot().tasks[0],
+      {
+        nextAction: '核实数据范围后继续检查',
+        waitCondition: '等待所有者提供范围',
+        nextWakeAt: new Date(Date.now() + 3600000).toISOString(),
+      },
+      false,
+    );
     await page.addInitScript(
       ({ url, token }) => {
         localStorage.setItem('openbot.server', url);
@@ -99,6 +109,9 @@ test('shows task health in activity records while worker reports stay out of cha
     await page.getByRole('button', { name: /^工作进展/ }).click();
     const card = page.locator('.task-card').filter({ hasText: '@BB 检查任务状态' });
     await expect(card.getByRole('status')).toHaveText('执行方报告受阻，需核实：需要确认数据范围');
+    await expect(card).toContainText('下一步：核实数据范围后继续检查');
+    await expect(card).toContainText('等待：等待所有者提供范围');
+    await expect(card).toContainText('下次检查：');
     await expect(card).not.toContainText('codex');
     await expect(card).not.toContainText('pipeline');
     await page.screenshot({ path: testInfo.outputPath('task-health.png'), fullPage: true });

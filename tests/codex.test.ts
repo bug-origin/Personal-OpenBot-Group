@@ -107,7 +107,7 @@ it('terminates a stalled native interrupt instead of leaving cancellation blocke
   });
   const result = execution.run();
   try {
-    await expect.poll(() => progress).toBe(true);
+    await expect.poll(() => progress, { timeout: 5000 }).toBe(true);
     const started = Date.now();
     await execution.cancel();
     expect((await result).status).toBe('cancelled');

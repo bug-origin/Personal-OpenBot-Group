@@ -112,6 +112,33 @@ it.each(['question', 'permission', 'command', 'file'])(
   },
 );
 
+it.each(['permission', 'command', 'file'])(
+  'declines Codex %s escalation for a read-only worker without asking the owner',
+  async (kind) => {
+    const f = fixture(kind);
+    f.job.resourceMode = 'read';
+    const execution = new CodexExecution(f.executable, f.job, {
+      session: () => {},
+      progress: () => {},
+      approval: () => {
+        throw new Error('read-only escalation');
+      },
+      interaction: () => {
+        throw new Error('read-only escalation');
+      },
+    });
+    expect((await execution.run()).status).toBe('completed');
+    const frames = readFileSync(f.log, 'utf8')
+      .trim()
+      .split('\n')
+      .map((s) => JSON.parse(s));
+    const result = frames.find((m) => m.id === 'native-request' && m.result).result;
+    expect(result).toEqual(
+      kind === 'permission' ? { permissions: {}, scope: 'turn' } : { decision: 'decline' },
+    );
+  },
+);
+
 it.each([
   {
     spec: { kind: 'permission', title: 'Read project' },

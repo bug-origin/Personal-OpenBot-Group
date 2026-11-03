@@ -39,6 +39,17 @@ export function TaskCard({
       </small>
       {task.execution && (
         <div className="task-progress">
+          {task.execution.contract?.nextAction &&
+            !['completed', 'cancelled'].includes(task.execution.contract.state) && (
+              <p>下一步：{task.execution.contract.nextAction}</p>
+            )}
+          {task.execution.contract?.waitCondition && (
+            <p>等待：{task.execution.contract.waitCondition}</p>
+          )}
+          {task.execution.contract?.nextWakeAt && (
+            <p>下次检查：{new Date(task.execution.contract.nextWakeAt).toLocaleString('zh-CN')}</p>
+          )}
+          {task.execution.workspace && <p>改动保存在独立工作副本，尚未合入原项目。</p>}
           {task.execution.activity && <p>{workActivity(task.execution.activity)}</p>}
           {task.execution.report && <p>{conversationalText(task.execution.report, [task])}</p>}
           {task.execution.health &&
