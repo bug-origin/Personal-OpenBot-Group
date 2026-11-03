@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, cp, symlink, rm, readFile, writeFile, readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, symlink, rm, readFile, writeFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -148,7 +148,8 @@ if (process.platform === 'darwin') {
     await mkdir(join(bundle, 'dmg'), { recursive: true });
     const imageSource = join(staging, 'image');
     await mkdir(imageSource);
-    await cp(application, join(imageSource, 'OpenBot.app'), { recursive: true });
+    // Preserve macOS metadata, including the application's stapled ticket.
+    await run('ditto', [application, join(imageSource, 'OpenBot.app')]);
     await symlink('/Applications', join(imageSource, 'Applications'));
     await run('hdiutil', [
       'create',
