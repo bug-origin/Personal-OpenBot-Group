@@ -1,0 +1,11 @@
+node_modules
+**/dist
+**/target
+**/gen
+package-lock.json
+.data
+test-results
+
+**/schema.generated.ts
+**/catalog.generated.ts
+apps/desktop/src-tauri/runtime

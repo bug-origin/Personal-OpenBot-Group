@@ -1,0 +1,207 @@
+import { spawn } from 'node:child_process';
+import { mkdir, mkdtemp, cp, symlink, rm, readFile, writeFile, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+const bundle = join(root, 'apps/desktop/src-tauri/target/release/bundle');
+const application = join(bundle, 'macos/OpenBot.app');
+const destination = join(bundle, 'dmg', `OpenBot_${version}_${process.arch}.dmg`);
+const identity = process.env.APPLE_SIGNING_IDENTITY;
+const profile = process.env.APPLE_NOTARY_PROFILE;
+const notarizeOnly = process.argv.includes('--notarize-only');
+
+async function run(command, args, env = process.env, capture = false) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: root,
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      env,
+    });
+    let output = '';
+    let error = '';
+    if (capture) {
+      child.stdout.on('data', (chunk) => {
+        output += chunk;
+      });
+      child.stderr.on('data', (chunk) => {
+        error += chunk;
+      });
+    }
+    child.on('error', reject);
+    child.on('exit', (code) =>
+      code === 0
+        ? resolve(output)
+        : reject(new Error(`${command} exited with ${code}${capture ? `: ${error.trim()}` : ''}`)),
+    );
+  });
+}
+
+async function signApplication() {
+  const runtime = join(application, 'Contents/Resources/runtime');
+  const entitlements = join(root, 'apps/desktop/src-tauri/node.entitlements.plist');
+  const sign = ['--force', '--sign', identity, '--timestamp', '--options', 'runtime'];
+  await run('codesign', [...sign, '--entitlements', entitlements, join(runtime, 'bin/node')]);
+  async function signLibraries(directory) {
+    for (const item of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, item.name);
+      if (item.isDirectory()) await signLibraries(path);
+      else if (/\.(?:node|dylib)$/.test(item.name)) await run('codesign', [...sign, path]);
+    }
+  }
+  await signLibraries(join(runtime, 'node_modules'));
+  await run('codesign', [...sign, application]);
+  await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', application]);
+}
+
+async function notarize(path, label) {
+  const output = await run(
+    'xcrun',
+    [
+      'notarytool',
+      'submit',
+      path,
+      '--keychain-profile',
+      profile,
+      '--wait',
+      '--timeout',
+      '20m',
+      '--output-format',
+      'json',
+    ],
+    process.env,
+    true,
+  );
+  const submission = JSON.parse(output);
+  console.log(`${label} notarization: ${submission.status} (${submission.id})`);
+  if (submission.status !== 'Accepted') {
+    const log = join(bundle, 'dmg', `notarization-${submission.id}.json`);
+    await mkdir(join(bundle, 'dmg'), { recursive: true });
+    await run('xcrun', ['notarytool', 'log', submission.id, '--keychain-profile', profile, log]);
+    throw new Error(`Apple rejected ${label}; inspect ${log}`);
+  }
+  if (!path.endsWith('.zip')) {
+    await run('xcrun', ['stapler', 'staple', path]);
+    await run('xcrun', ['stapler', 'validate', path]);
+  }
+  return submission.id;
+}
+
+if (notarizeOnly && (process.platform !== 'darwin' || !identity || !profile))
+  throw new Error(
+    '--notarize-only requires macOS, APPLE_SIGNING_IDENTITY and APPLE_NOTARY_PROFILE',
+  );
+
+if (!notarizeOnly) {
+  await run('npm', ['run', 'release:check']);
+  await run('npm', ['run', 'typecheck']);
+  const args = ['run', 'tauri', '-w', '@openbot/desktop', '--', 'build'];
+  if (process.platform === 'darwin') args.push('--bundles', 'app');
+  await run('npm', args, {
+    ...process.env,
+    PATH: `${process.env.HOME}/.cargo/bin:${process.env.PATH}`,
+  });
+  if (process.platform === 'darwin' && identity) await signApplication();
+  await run(process.execPath, ['scripts/smoke-embedded-runtime.mjs'], {
+    ...process.env,
+    ...(process.platform === 'darwin'
+      ? { OPENBOT_RUNTIME_DIR: join(application, 'Contents/Resources/runtime') }
+      : {}),
+  });
+}
+
+if (process.platform === 'darwin') {
+  const packagedVersion = (
+    await run(
+      'plutil',
+      [
+        '-extract',
+        'CFBundleShortVersionString',
+        'raw',
+        '-o',
+        '-',
+        join(application, 'Contents/Info.plist'),
+      ],
+      process.env,
+      true,
+    )
+  ).trim();
+  if (packagedVersion !== version)
+    throw new Error(`Packaged version ${packagedVersion} does not match source version ${version}`);
+  const staging = await mkdtemp(join(tmpdir(), 'openbot-release-'));
+  const submissions = {};
+  try {
+    if (profile) {
+      if (!identity) throw new Error('Notarization requires APPLE_SIGNING_IDENTITY');
+      await run('codesign', ['--verify', '--deep', '--strict', application]);
+      const archive = join(staging, 'OpenBot.zip');
+      await run('ditto', ['-c', '-k', '--keepParent', application, archive]);
+      submissions.application = await notarize(archive, 'application archive');
+      // ZIPs cannot carry tickets; staple the accepted application itself.
+      await run('xcrun', ['stapler', 'staple', application]);
+      await run('xcrun', ['stapler', 'validate', application]);
+      await run('spctl', ['--assess', '--type', 'execute', '--verbose=2', application]);
+    }
+    await mkdir(join(bundle, 'dmg'), { recursive: true });
+    const imageSource = join(staging, 'image');
+    await mkdir(imageSource);
+    await cp(application, join(imageSource, 'OpenBot.app'), { recursive: true });
+    await symlink('/Applications', join(imageSource, 'Applications'));
+    await run('hdiutil', [
+      'create',
+      '-volname',
+      'OpenBot',
+      '-srcfolder',
+      imageSource,
+      '-ov',
+      '-format',
+      'UDZO',
+      destination,
+    ]);
+    if (identity) {
+      await run('codesign', ['--force', '--sign', identity, '--timestamp', destination]);
+      await run('codesign', ['--verify', '--strict', '--verbose=2', destination]);
+    }
+    if (profile) {
+      submissions.diskImage = await notarize(destination, 'disk image');
+      await run('spctl', [
+        '--assess',
+        '--type',
+        'open',
+        '--context',
+        'context:primary-signature',
+        '--verbose=2',
+        destination,
+      ]);
+    }
+    const sha256 = createHash('sha256')
+      .update(await readFile(destination))
+      .digest('hex');
+    await writeFile(
+      join(bundle, 'dmg', 'SHA256SUMS'),
+      `${sha256}  OpenBot_${version}_${process.arch}.dmg\n`,
+    );
+    await writeFile(
+      join(bundle, 'dmg', 'release-metadata.json'),
+      JSON.stringify(
+        {
+          version,
+          platform: process.platform,
+          arch: process.arch,
+          signed: Boolean(identity),
+          notarized: Boolean(profile),
+          submissions,
+          sha256,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    console.log(`DMG ready: ${destination}`);
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
