@@ -4,16 +4,19 @@
 
 ## 默认消息链路
 
-| 环节           | 源码                                                                                   | 职责                                                                         |
-| -------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| 注意力         | [attention-model.ts](../apps/server/src/attention-model.ts) 的 `attentionInstructions` | 只返回是否唤醒，不执行工具；私聊、直接提及、人类回复及本人的任务事件跳过判断 |
-| Bot 主会话     | [bot-coordinator.ts](../apps/server/src/bot-coordinator.ts) 的上下文构造               | 身份、消息归属、记忆、目标、协作和验收规则                                   |
-| 工具定义       | [coordinator-model.ts](../apps/server/src/coordinator-model.ts) 的 `coordinatorTools`  | 调度工具说明、模型请求和返回校验                                             |
-| 目标与交付参数 | [work-schemas.ts](../apps/server/src/work-schemas.ts) 的 `ownershipSchemas`            | 目标、项目事实和交付物工具的参数；转换为模型使用的 JSON Schema               |
-| 工作区工具参数 | [workspace-tool-schemas.ts](../apps/server/src/workspace-tool-schemas.ts)              | 群组、成员、资料、消息和实时查询；同一份定义用于模型 Schema 和执行校验       |
-| Worker 规则    | [instructions.ts](../apps/bridge/src/instructions.ts) 的 `botInstructions`             | 当前执行身份、资源模式、版本化事实及验证输入                                 |
-| Worker 正文    | [prompt.ts](../apps/bridge/src/prompt.ts)                                              | 初始要求、引用与会话续接增量                                                 |
-| 交互卡片       | [prompt.ts](../packages/shared/src/ui/prompt.ts) 的 `uiCapabilityInstructions`         | Bot 与 Worker 共用的声明式 UI 规则                                           |
+| 环节           | 源码                                                                                             | 职责                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| 共同性格       | [persona.ts](../packages/shared/src/persona.ts) 的 `botPersona`                                  | 所有 Bot 共用的性格、工作主线和表达原则；主会话与 Worker 都以它开头                   |
+| 注意力         | [attention-model.ts](../apps/server/src/models/attention-model.ts) 的 `attentionInstructions`    | 只返回是否唤醒，不执行工具；私聊、直接提及、人类回复及本人的任务事件跳过判断          |
+| Bot 主会话     | [bot-prompt.ts](../apps/server/src/bot/bot-prompt.ts) 的 `coordinatorInstructions`               | 按“性格 → 对话职责 → 当前事件 → 相关规则”分层组装；进行中工作的验收与交付规则按需加入 |
+| 主会话上下文   | [bot-coordinator.ts](../apps/server/src/bot/bot-coordinator.ts) 的 `context`                     | 长期偏好、历史记忆、成员关系、目标与任务等运行时数据                                  |
+| 记忆整理       | [memory-curator.ts](../apps/server/src/memory/memory-curator.ts) 的 `memoryCurationInstructions` | 后台整理人类消息中的长期偏好和事实；与是否回复无关，不发言、不执行                    |
+| 工具定义       | [coordinator-model.ts](../apps/server/src/models/coordinator-model.ts) 的 `coordinatorTools`     | 调度工具说明、模型请求和返回校验                                                      |
+| 目标与交付参数 | [work-schemas.ts](../apps/server/src/work/work-schemas.ts) 的 `ownershipSchemas`                 | 目标、项目事实和交付物工具的参数；转换为模型使用的 JSON Schema                        |
+| 工作区工具参数 | [workspace-tool-schemas.ts](../apps/server/src/bot/workspace-tool-schemas.ts)                    | 群组、成员、资料、消息和实时查询；同一份定义用于模型 Schema 和执行校验                |
+| Worker 规则    | [instructions.ts](../apps/bridge/src/instructions.ts) 的 `botInstructions`                       | 当前执行身份、资源模式、版本化事实及验证输入                                          |
+| Worker 正文    | [prompt.ts](../apps/bridge/src/prompt.ts)                                                        | 初始要求、引用与会话续接增量                                                          |
+| 交互卡片       | [prompt.ts](../packages/shared/src/ui/prompt.ts) 的 `uiCapabilityInstructions`                   | Bot 与 Worker 共用的声明式 UI 规则                                                    |
 
 注意力模型独立调用；主会话拥有调度工具；Worker 使用本机 Agent 执行。模型服务和 Bot 职责来自本机配置，不写入仓库模板。
 
@@ -29,13 +32,9 @@
 
 上下文压缩由 `bot-context.ts` 在模型调用前自动触发，摘要规则位于 `coordinator-model.ts` 的 `contextSummaryInstructions`，整理调用不提供工具。主会话通过 `read_context` 引用回查原始工具收据与不可变上下文快照。摘要属于待核实的工作上下文，不自动写入 BotMemory，也不充当所有者新指令或验收证据。
 
-## 兼容入口
-
-[brain.ts](../apps/server/src/brain.ts)、[dialogue.ts](../apps/server/src/dialogue.ts) 和 [conversations.ts](../apps/server/src/conversations.ts) 保留旧路由与单次 JSON 对话接口，供兼容调用和回归测试使用。默认应用入口使用每个 Bot 独立的注意力与主会话。
-
 ## 修改与验证
 
-修改规则时直接修改对应源码，行为变化补充相应测试。注意力见 `tests/attention.test.ts`，协调与任务见 `tests/coordinator.test.ts`、`tests/durable-work.test.ts` 和 `tests/work-ownership.test.ts`，Worker 协议见 `tests/codex.test.ts`、`tests/claude.test.ts` 和 `tests/native-adapters.test.ts`。
+修改规则时直接修改对应源码，行为变化补充相应测试。注意力见 `tests/server/attention.test.ts`，协调与任务见 `tests/server/coordinator.test.ts`、`tests/server/durable-work.test.ts` 和 `tests/server/work-ownership.test.ts`，Worker 协议见 `tests/bridge/codex.test.ts`、`tests/bridge/claude.test.ts` 和 `tests/bridge/native-adapters.test.ts`。
 
 ```sh
 npm run typecheck

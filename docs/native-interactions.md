@@ -36,10 +36,10 @@ Codex 检查本机协议是否支持 auto_review；明确任务目录内使用 w
 ## 验证
 
 ```sh
-npx vitest run tests/native.test.ts tests/native-adapters.test.ts tests/claude.test.ts
+npx vitest run tests/server/native.test.ts tests/bridge/native-adapters.test.ts tests/bridge/claude.test.ts
 npm run test:e2e -- tests/e2e/native.spec.ts
 ```
 
 这些测试使用临时数据库与隔离的协议进程，不调用真实模型、不修改日常群组。浏览器验证涵盖原生问答提交、刷新后只读、多选与补充文本、秘密输入掩码、拒绝、会话授权和停止后失效；整个流程保持只有原来的一次执行。
 
-真实 Claude 验证可运行 `node --import tsx scripts/smoke-native.mjs`。它会使用本机登录调用模型，在临时目录发起原生问答，只允许一次写入该目录内指定文件，核对文件内容后清理；不会操作日常群组。原生会话仍保存在 Claude 本地历史。实际执行时的登录必须有效，`auth status` 本身不保证模型请求可用。
+真实 Claude 验证可运行 `node --import tsx scripts/smoke/native.mjs`。它会使用本机登录调用模型，在临时目录发起原生问答，只允许一次写入该目录内指定文件，核对文件内容后清理；不会操作日常群组。原生会话仍保存在 Claude 本地历史。实际执行时的登录必须有效，`auth status` 本身不保证模型请求可用。

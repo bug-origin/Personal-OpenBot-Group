@@ -11,26 +11,24 @@ import type {
   Message,
   NativeRequestSpec,
   Provider,
+  Task,
 } from '@openbot/shared';
 import { resolveMentions } from '@openbot/shared';
 import type { Store } from './store.js';
-import type { BrainRouter } from './brain.js';
-import type { DialogueAgent } from './dialogue.js';
-import { formatTaskStatus } from './dialogue.js';
-import { Conversations } from './conversations.js';
-import { UiService, uiFromText } from './ui.js';
-import { NativeRequests } from './native.js';
-import { BotCoordinator, type WorkerOptions } from './bot-coordinator.js';
-import type { CoordinatorModel } from './coordinator-model.js';
-import type { AttentionModel } from './attention-model.js';
-import { TaskPipelines } from './task-pipelines.js';
-import { TaskContracts } from './task-contracts.js';
-import { TaskResources } from './task-resources.js';
-import { WorkGoals } from './work-goals.js';
-import { ProjectFacts, type ProjectFact } from './project-facts.js';
-import { WorkArtifacts } from './work-artifacts.js';
+import { UiService, uiFromText } from './host/ui.js';
+import { NativeRequests } from './host/native.js';
+import { BotCoordinator, type WorkerOptions } from './bot/bot-coordinator.js';
+import type { CoordinatorModel } from './models/coordinator-model.js';
+import type { AttentionModel } from './models/attention-model.js';
+import type { MemoryCuratorModel } from './memory/memory-curator.js';
+import { TaskPipelines } from './work/task-pipelines.js';
+import { TaskContracts } from './work/task-contracts.js';
+import { TaskResources } from './work/task-resources.js';
+import { WorkGoals } from './work/work-goals.js';
+import { ProjectFacts, type ProjectFact } from './work/project-facts.js';
+import { WorkArtifacts } from './work/work-artifacts.js';
 import type { WorkArtifact } from '@openbot/shared';
-import { BotDelegations } from './bot-delegations.js';
+import { BotDelegations } from './bot/bot-delegations.js';
 type Link = { info: BridgeInfo; send: (command: BridgeCommand) => void; close: () => void };
 export class Runtime {
   executionPermissionMode: ExecutionPermissionMode = 'auto';
@@ -39,12 +37,9 @@ export class Runtime {
   private controller = new AbortController();
   private watchdogTimer?: ReturnType<typeof setInterval>;
   private pending = new Set<Promise<unknown>>();
-  private routeQueues = new Map<string, Promise<unknown>>();
   private cancelTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly maxRounds: number;
-  private healthy = true;
-  private brainError: string | undefined;
-  private conversations?: Conversations | BotCoordinator;
+  private conversations?: BotCoordinator;
   readonly ui: UiService;
   readonly native: NativeRequests;
   private pipelines: TaskPipelines;
@@ -56,12 +51,11 @@ export class Runtime {
   constructor(
     private store: Store,
     private changed: () => void,
-    private brain?: BrainRouter,
     maxRounds = 6,
-    dialogue?: DialogueAgent,
     private coordinator?: CoordinatorModel,
     private workerLimits = { perBot: 2, perBridge: 4 },
     private attention?: AttentionModel,
+    private curation?: { model: MemoryCuratorModel; delayMs?: number },
   ) {
     this.maxRounds = maxRounds;
     this.pipelines = new TaskPipelines(store);
@@ -82,19 +76,6 @@ export class Runtime {
       link.send({ type: 'native_reply', taskId, leaseId, requestId, response });
     });
     if (coordinator) this.conversations = this.createCoordinator(coordinator);
-    else if (dialogue)
-      this.conversations = new Conversations(store, changed, dialogue, {
-        create: (message, botId, goal, contextIds) => {
-          const ids = this.enqueue(message, [botId], message.correlationId!, 1, goal, contextIds);
-          return this.store.snapshot().tasks.find((t) => t.id === ids?.[0]);
-        },
-        change: (id, instruction, version, sourceId) =>
-          this.changeTask(id, instruction, version, sourceId),
-        stop: (id) => this.stopTask(id),
-        continue: (id, message, version) => this.continueTask(id, message, version),
-        render: (message, botId, document) =>
-          this.ui.publish(message.groupId, botId, document, message.id),
-      });
   }
   private createCoordinator(model: CoordinatorModel) {
     return new BotCoordinator(
@@ -135,18 +116,14 @@ export class Runtime {
         },
       },
       this.attention,
+      this.curation,
     );
   }
   get hasCoordinator() {
     return Boolean(this.coordinator);
   }
-  get dialogueEnabled() {
-    return Boolean(this.conversations);
-  }
   enableCoordinator(model: CoordinatorModel) {
     if (this.coordinator) return;
-    if (this.conversations)
-      throw Object.assign(new Error('请先结束旧版对话，再启用新的模型设置'), { statusCode: 409 });
     this.coordinator = model;
     this.conversations = this.createCoordinator(model);
     this.conversations.start();
@@ -161,17 +138,15 @@ export class Runtime {
     }
   }
   checkProgress(now = Date.now()) {
-    if (!this.closed && this.conversations instanceof BotCoordinator)
-      this.conversations.watchdog(now);
+    if (!this.closed) this.conversations?.watchdog(now);
   }
   get bridges() {
     return [...this.links.values()].map((l) => l.info);
   }
   get brainState() {
     return {
-      enabled: Boolean(this.coordinator || this.brain),
-      healthy: this.healthy,
-      ...(this.brainError ? { error: this.brainError } : {}),
+      enabled: Boolean(this.coordinator),
+      healthy: true,
     };
   }
   private note(
@@ -355,99 +330,7 @@ export class Runtime {
       this.deliver(message, [directBotId], chain);
       return;
     }
-    if (message.mentions.length) {
-      this.deliver(message, message.mentions, chain);
-      return;
-    }
-    if (!this.brain) return;
-    this.store.db
-      .prepare(
-        "INSERT OR IGNORE INTO routing_decisions(message_id,status,created_at) VALUES(?,'pending',?)",
-      )
-      .run(message.id, new Date().toISOString());
-    const previous = this.routeQueues.get(message.groupId) ?? Promise.resolve();
-    const job = previous.catch(() => {}).then(() => this.route(message, chain));
-    this.routeQueues.set(message.groupId, job);
-    this.pending.add(job);
-    void job.finally(() => {
-      this.pending.delete(job);
-      if (this.routeQueues.get(message.groupId) === job) this.routeQueues.delete(message.groupId);
-    });
-  }
-  private async route(message: Message, chain: string) {
-    if (this.closed) return;
-    try {
-      const state = this.store.snapshot(),
-        group = state.groups.find((g) => g.id === message.groupId)!;
-      const bots = state.bots.filter(
-        (b) => group.botIds.includes(b.id) && (this.conversations || this.ready(b)),
-      );
-      if (!bots.length) {
-        this.store.db
-          .prepare(
-            "UPDATE routing_decisions SET status='completed',action='ignore',reason='没有已连接的群组 Bot' WHERE message_id=?",
-          )
-          .run(message.id);
-        return;
-      }
-      const messages = state.messages.filter((m) => m.groupId === group.id);
-      const boundary = messages.findIndex((m) => m.id === message.id);
-      let result = await this.brain!(
-        { group, bots, message, messages: messages.slice(0, boundary + 1) },
-        this.controller.signal,
-      );
-      if (this.closed) return;
-      // Routing chooses a conversational recipient, not whether there is executable work.
-      // Only plain acknowledgments may be silently ignored in continuous dialogue mode.
-      if (
-        this.conversations &&
-        result.action === 'ignore' &&
-        !/^(谢谢(?:你|你们|大家)?|多谢|感谢|好的?|收到|明白(?:了)?|了解(?:了)?|嗯+|ok|okay|thanks|thank you)[\s!！。.,，👍]*$/iu.test(
-          message.content.trim(),
-        )
-      ) {
-        const history = messages.slice(0, boundary + 1);
-        const reply = history.find((m) => m.id === message.replyTo);
-        const addressed = bots.find((b) =>
-          message.content.trim().toLowerCase().startsWith(b.name.toLowerCase()),
-        );
-        const recent = history
-          .slice()
-          .reverse()
-          .find((m) => m.senderType === 'bot' && bots.some((b) => b.id === m.senderId));
-        const target =
-          addressed ??
-          bots.find((b) => b.id === reply?.senderId) ??
-          bots.find((b) => b.id === recent?.senderId) ??
-          bots[0];
-        result = {
-          action: 'wake',
-          botIds: [target.id],
-          reason: '持续对话兜底：交给群内对话 Bot 回应，不代表创建执行任务',
-        };
-      }
-      this.store.db.transaction(() => {
-        this.store.db
-          .prepare(
-            "UPDATE routing_decisions SET status='completed',action=?,bot_ids=?,reason=? WHERE message_id=?",
-          )
-          .run(result.action, JSON.stringify(result.botIds), result.reason, message.id);
-        if (result.action === 'wake') this.deliver(message, result.botIds, chain);
-        else if (result.action === 'clarify') this.ui.askBots(message, result.botIds);
-      })();
-      this.healthy = true;
-      this.brainError = undefined;
-      this.changed();
-    } catch {
-      if (this.closed) return;
-      this.healthy = false;
-      this.brainError = '自动分配暂不可用，可使用 @Bot。';
-      this.store.db
-        .prepare("UPDATE routing_decisions SET status='failed',reason=? WHERE message_id=?")
-        .run(this.brainError, message.id);
-      this.note(message.groupId, this.brainError, chain, message.id);
-      this.changed();
-    }
+    if (message.mentions.length) this.deliver(message, message.mentions, chain);
   }
   private deliver(message: Message, ids: string[], chain: string) {
     if (!this.conversations) {
@@ -468,25 +351,9 @@ export class Runtime {
       );
     if (!message) throw Object.assign(new Error('可重试的消息不存在'), { statusCode: 404 });
     if (!this.conversations) throw Object.assign(new Error('持续对话未启用'), { statusCode: 409 });
-    if (this.conversations instanceof BotCoordinator) {
-      const retried = this.conversations.retry(message, botId);
-      if (retried) this.changed();
-      return { ok: true, retried };
-    }
-    if (
-      this.store.db.prepare('SELECT id FROM dialogue_inbox WHERE source_message_id=?').get(id) ||
-      this.store.db.prepare('SELECT task_id FROM task_runtime WHERE source_message_id=?').get(id)
-    )
-      return { ok: true, retried: false };
-    const route = this.store.db
-      .prepare('SELECT status FROM routing_decisions WHERE message_id=?')
-      .get(id) as { status: string } | undefined;
-    if (route?.status === 'pending') return { ok: true, retried: false };
-    this.store.db
-      .prepare("UPDATE routing_decisions SET status='pending' WHERE message_id=?")
-      .run(id);
-    this.accept(message);
-    return { ok: true, retried: true };
+    const retried = this.conversations.retry(message, botId);
+    if (retried) this.changed();
+    return { ok: true, retried };
   }
   private enqueue(
     message: Message,
@@ -931,7 +798,7 @@ export class Runtime {
     if (!current) return;
     const { task, bot, meta } = current;
     if (event.type === 'heartbeat') {
-      if (this.conversations instanceof BotCoordinator) this.conversations.heartbeat(task.id);
+      if (this.conversations) this.conversations.heartbeat(task.id);
       return;
     }
     if (event.type === 'report' && task.status === 'running') {
@@ -939,7 +806,7 @@ export class Runtime {
       this.store.db
         .prepare('UPDATE task_specs SET report=?,updated_at=? WHERE task_id=?')
         .run(summary, new Date().toISOString(), task.id);
-      if (this.conversations instanceof BotCoordinator)
+      if (this.conversations)
         this.conversations.progress(task, event.leaseId, summary, event.reportKind);
       this.changed();
       return;
@@ -1008,11 +875,7 @@ export class Runtime {
         .prepare('UPDATE tasks SET result=? WHERE id=?')
         .run((event.text ?? '').slice(0, 64000), task.id);
       this.store.db.prepare("UPDATE bots SET status='working' WHERE id=?").run(bot.id);
-      if (
-        event.text &&
-        event.text !== task.result &&
-        this.conversations instanceof BotCoordinator
-      ) {
+      if (event.text && event.text !== task.result && this.conversations) {
         this.store.db
           .prepare('UPDATE task_specs SET updated_at=? WHERE task_id=?')
           .run(new Date().toISOString(), task.id);
@@ -1032,8 +895,7 @@ export class Runtime {
           new Date().toISOString(),
           task.id,
         );
-      if (this.conversations instanceof BotCoordinator)
-        this.conversations.progress(task, event.leaseId, event.report);
+      if (this.conversations) this.conversations.progress(task, event.leaseId, event.report);
       this.changed();
       return;
     }
@@ -1273,14 +1135,13 @@ export class Runtime {
     return { task, summary: formatTaskStatus(task) };
   }
   stopGoal(id: string) {
-    const result =
-      this.conversations instanceof BotCoordinator
-        ? this.conversations.stopGoal(id)
-        : new BotDelegations(
-            this.store,
-            () => {},
-            (taskId) => this.stopTask(taskId),
-          ).cancelGoal(id);
+    const result = this.conversations
+      ? this.conversations.stopGoal(id)
+      : new BotDelegations(
+          this.store,
+          () => {},
+          (taskId) => this.stopTask(taskId),
+        ).cancelGoal(id);
     this.changed();
     this.schedule();
     return result;
@@ -1486,7 +1347,7 @@ export class Runtime {
           .prepare("UPDATE work_goals SET state='cancelled',next_check_at=NULL WHERE id=?")
           .run(g.id);
     }
-    if (this.conversations instanceof BotCoordinator) this.conversations.cancelDelegations(id);
+    if (this.conversations) this.conversations.cancelDelegations(id);
     this.store.db
       .prepare('UPDATE task_workers SET stopped=1 WHERE task_id=? OR parent_task_id=?')
       .run(id, id);
@@ -1569,7 +1430,7 @@ export class Runtime {
     const chain = this.store.db.prepare('SELECT id FROM collaboration_chains WHERE id=?').get(id);
     if (!chain) throw Object.assign(new Error('协作链不存在'), { statusCode: 404 });
     this.store.db.prepare('UPDATE collaboration_chains SET stopped=1 WHERE id=?').run(id);
-    if (this.conversations instanceof BotCoordinator)
+    if (this.conversations)
       for (const task of this.store.snapshot().tasks.filter((t) => t.correlationId === id))
         this.conversations.cancelDelegations(task.id);
     this.store.db
@@ -1631,4 +1492,34 @@ export class Runtime {
     await this.conversations?.close();
     await Promise.allSettled([...this.pending]);
   }
+}
+
+function formatTaskStatus(task: Task) {
+  const labels: Record<Task['status'], string> = {
+    queued: '等待执行',
+    running: '执行中',
+    cancelling: '正在停止旧执行',
+    reviewing: '正在检查结果',
+    completed: '已完成',
+    failed: '执行失败',
+    cancelled: '已取消',
+  };
+  const e = task.execution;
+  return [
+    `任务 ${task.id.slice(0, 8)}：${task.input.slice(0, 180)}`,
+    `状态：${labels[task.status]}`,
+    e
+      ? `要求版本：v${e.version}；本次执行：${e.executedVersion ? `v${e.executedVersion}` : '尚未开始'}`
+      : '',
+    e?.activity ? `当前活动：${e.activity}` : '',
+    e?.report ? `最近汇报（执行者）：${e.report}` : '',
+    e?.pendingChange ? '变更：已收到，等待旧执行停止确认后续接；尚未采纳。' : '',
+    task.error ? `说明：${task.error}` : '',
+    ['completed', 'failed', 'cancelled'].includes(task.status) && task.result
+      ? `最近结果：${task.result.slice(-3000)}`
+      : '',
+    `记录更新时间：${e?.updatedAt ?? task.finishedAt ?? task.startedAt ?? task.createdAt}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
 }

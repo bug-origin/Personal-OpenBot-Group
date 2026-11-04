@@ -48,4 +48,4 @@ Bot 主会话直接调用这些工具查询实时数据、管理群组和沟通�
 
 列表普遍支持 `offset`、`limit`、`nextOffset`，并返回查询时间 `observedAt`。历史记忆和历史收据不能覆盖更新的实时状态。工具参数来自同一份 Zod 定义并转换为模型使用的 JSON Schema。
 
-实现入口：`workspace-tool-schemas.ts`、`bot-workspace.ts`、`bot-conversations.ts`、`bot-coordinator.ts`。回归测试见 `tests/bot-workspace.test.ts`。
+实现入口：`workspace-tool-schemas.ts`、`bot-workspace.ts`、`bot-conversations.ts`、`bot-coordinator.ts`。回归测试见 `tests/server/bot-workspace.test.ts`。

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import type { Bot, Group, Message, Snapshot, Task, TaskExecution } from '@openbot/shared';
-import { goalSelect, artifactSelect } from './work-records.js';
+import { goalSelect, artifactSelect } from './work/work-records.js';
 import type { WorkGoal, WorkArtifact } from '@openbot/shared';
 export function createStore(path: string) {
   const db = new Database(path);
@@ -28,6 +28,7 @@ export function createStore(path: string) {
     '016_bot_avatars.sql',
     '017_message_attention_order.sql',
     '018_bot_context.sql',
+    '019_memory_curation.sql',
   ]) {
     const hasHistory = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'")

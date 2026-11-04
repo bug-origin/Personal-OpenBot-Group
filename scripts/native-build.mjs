@@ -131,7 +131,7 @@ if (!notarizeOnly) {
     PATH: `${process.env.HOME}/.cargo/bin:${process.env.PATH}`,
   });
   if (process.platform === 'darwin' && identity) await signApplication();
-  await run(process.execPath, ['scripts/smoke-embedded-runtime.mjs'], {
+  await run(process.execPath, ['scripts/smoke/embedded-runtime.mjs'], {
     ...process.env,
     ...(process.platform === 'darwin'
       ? { OPENBOT_RUNTIME_DIR: join(application, 'Contents/Resources/runtime') }

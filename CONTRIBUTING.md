@@ -37,8 +37,8 @@ CI 在 Linux 上执行上述源码与浏览器检查。macOS 桌面打包、签�
 
 ```sh
 npm run build:runtime
-node scripts/smoke-embedded-runtime.mjs
-node --import tsx scripts/smoke-ui.mjs
+node scripts/smoke/embedded-runtime.mjs
+node --import tsx scripts/smoke/ui.mjs
 ```
 
 第一项验证内置后台的独立启动、Bridge 连接、持久化和退出恢复；第二项在前端构建后检查生产资源的 CSP 与卡片交互，包含旧路由兼容场景。
@@ -47,11 +47,11 @@ node --import tsx scripts/smoke-ui.mjs
 
 | 命令（前缀为 `node --import tsx`）   | 验证内容                          |
 | ------------------------------------ | --------------------------------- |
-| `scripts/smoke-attention.mjs --live` | 真实注意力判断                    |
-| `scripts/smoke-social.mjs --live`    | 主会话日常交流                    |
-| `scripts/smoke-coordinator.mjs`      | 主会话、只读 Worker 与证据验收    |
-| `scripts/smoke-claude.mjs`           | Claude 执行、续接与混合 Provider  |
-| `scripts/smoke-native.mjs`           | Claude 原生提问及临时文件写入审批 |
+| `scripts/smoke/attention.mjs --live` | 真实注意力判断                    |
+| `scripts/smoke/social.mjs --live`    | 主会话日常交流                    |
+| `scripts/smoke/coordinator.mjs`      | 主会话、只读 Worker 与证据验收    |
+| `scripts/smoke/claude.mjs`           | Claude 执行、续接与混合 Provider  |
+| `scripts/smoke/native.mjs`           | Claude 原生提问及临时文件写入审批 |
 
 ## 数据和许可
 

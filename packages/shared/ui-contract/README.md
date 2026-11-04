@@ -122,4 +122,4 @@ npm run test:e2e
 
 Validation and formula evaluation live in `packages/shared/src/ui/`; rendering lives in
 `apps/desktop/src/renderer/`. The production renderer can also be checked without model
-calls using `node --import tsx scripts/smoke-ui.mjs` after building the frontend.
+calls using `node --import tsx scripts/smoke/ui.mjs` after building the frontend.

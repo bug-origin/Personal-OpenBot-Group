@@ -3,14 +3,17 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { timingSafeEqual } from 'node:crypto';
 import { Runtime } from './runtime.js';
-import type { BrainRouter } from './brain.js';
-import type { DialogueAgent } from './dialogue.js';
-import { createCoordinatorModel, type CoordinatorModel } from './coordinator-model.js';
-import { createAttentionModel, type AttentionModel } from './attention-model.js';
+import { createCoordinatorModel, type CoordinatorModel } from './models/coordinator-model.js';
+import { createAttentionModel, type AttentionModel } from './models/attention-model.js';
+import { createMemoryCuratorModel, type MemoryCuratorModel } from './memory/memory-curator.js';
 import { readBrainConfig, type BrainConfig } from './config.js';
-import { ModelSettings, modelConnectionSchema, modelSettingsSchema } from './model-settings.js';
-import { ExecutionSettings, executionSettingsSchema } from './execution-settings.js';
-import { listProviderModels } from './model-providers.js';
+import {
+  ModelSettings,
+  modelConnectionSchema,
+  modelSettingsSchema,
+} from './models/model-settings.js';
+import { ExecutionSettings, executionSettingsSchema } from './models/execution-settings.js';
+import { listProviderModels } from './models/model-providers.js';
 import type { ActionEnvelope } from '@openbot/shared/ui/types';
 import { z } from 'zod';
 import { resolveMentions, type Message } from '@openbot/shared';
@@ -24,17 +27,16 @@ import {
 } from '@openbot/shared/schemas';
 import type { WebSocket } from 'ws';
 import { createStore } from './store.js';
-import { removeGroup } from './group-removal.js';
+import { removeGroup } from './bot/group-removal.js';
 export async function createApp(options: {
   databasePath: string;
   token: string;
   logger?: boolean;
   clientOrigin?: string;
   bridgeToken?: string;
-  brain?: BrainRouter;
-  dialogue?: DialogueAgent;
   coordinator?: CoordinatorModel;
   attention?: AttentionModel;
+  memoryCuration?: { model: MemoryCuratorModel; delayMs?: number };
   modelConfig?: BrainConfig;
   workerLimits?: { perBot: number; perBridge: number };
   maxRounds?: number;
@@ -60,6 +62,16 @@ export async function createApp(options: {
     return model(input, signal);
   };
   const attention = options.attention ?? configuredAttention;
+  // Curation is background upkeep: without a configured model it quietly records nothing.
+  const configuredCuration: MemoryCuratorModel = async (input, signal) => {
+    const config = settings.current();
+    const model = createMemoryCuratorModel({
+      ...config,
+      model: config.attentionModel || config.model,
+    });
+    return model ? model(input, signal) : { memories: [] };
+  };
+  const memoryCuration = options.memoryCuration ?? { model: configuredCuration };
   const clients = new Set<WebSocket>();
   const validToken = (value: string, expected = options.token) => {
     const a = Buffer.from(value),
@@ -101,12 +113,11 @@ export async function createApp(options: {
   const runtime = new Runtime(
     store,
     broadcast,
-    options.brain,
     options.maxRounds,
-    options.dialogue,
     coordinator,
     options.workerLimits,
     attention,
+    memoryCuration,
   );
   runtime.executionPermissionMode = executionSettings.mode;
   runtime.start();
@@ -131,7 +142,7 @@ export async function createApp(options: {
     bridges: runtime.bridges,
     brain: runtime.brainState,
     dialogue: {
-      enabled: runtime.dialogueEnabled,
+      enabled: runtime.hasCoordinator,
       ...(runtime.hasCoordinator ? { mode: 'per-bot' } : {}),
     },
     model: {
@@ -173,10 +184,9 @@ export async function createApp(options: {
     settings.resolve(body);
     if (
       !runtime.hasCoordinator &&
-      (runtime.dialogueEnabled ||
-        store
-          .snapshot()
-          .tasks.some((t) => ['queued', 'running', 'cancelling', 'reviewing'].includes(t.status)))
+      store
+        .snapshot()
+        .tasks.some((t) => ['queued', 'running', 'cancelling', 'reviewing'].includes(t.status))
     )
       throw fail(409, '请先结束当前执行，再启用新的模型设置');
     const view = settings.save(body);

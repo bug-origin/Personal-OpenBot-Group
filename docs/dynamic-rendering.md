@@ -12,12 +12,12 @@ Bot 主会话可以调用 `render` 展示表单、选项和图表。Worker 也�
 
 - [桌面 Renderer](../apps/desktop/src/renderer/Renderer.tsx)：组件呈现与本地交互。
 - [共享引擎](../packages/shared/src/ui/engine.ts)：Schema 校验、状态绑定与纯计算。
-- [UI 服务](../apps/server/src/ui.ts)：文档持久化、提交校验与幂等处理。
+- [UI 服务](../apps/server/src/host/ui.ts)：文档持久化、提交校验与幂等处理。
 - [协议参考](../packages/shared/ui-contract/README.md)：格式、组件和示例。修改后运行 `npm run generate:ui` 并提交生成结果。
 
 已认证客户端可通过 `POST /api/groups/:id/cards` 发布 `{botId, document, replyTo?}`，通过 `POST /api/cards/:messageId/actions` 提交 ActionEnvelope。
 
-宿主只接受预定义的 `reply` 和服务端生成的 `choose_bots` 操作。`choose_bots` 保留在旧路由兼容入口中，默认 Bot 独立协调流程没有群级分工模型。客户端不能任意指定执行对象、命令或目标 URL。
+宿主只接受预定义的 `reply` 操作；旧版本生成的 `choose_bots` 分工卡仍可提交，但不再生成新的分工卡。客户端不能任意指定执行对象、命令或目标 URL。
 
 提交时校验群组、成员、版本、可见组件、实例、表单字段及原始绑定。同一请求重试只产生一条用户消息，旧版本和已处理卡片拒绝再次操作。原生权限卡片走[独立审批协议](native-interactions.md)，普通 UI 不能授予本机执行权限。
 
@@ -25,4 +25,4 @@ Bot 主会话可以调用 `render` 展示表单、选项和图表。Worker 也�
 
 ## 验证
 
-`npm test` 覆盖协议、公式、篡改、版本与重复提交；`npm run test:e2e` 覆盖表单、草稿恢复与窄屏布局。构建后运行 `node --import tsx scripts/smoke-ui.mjs` 可验证生产资源、严格 CSP、表单和图表，包含旧分工卡兼容场景，不调用真实模型。
+`npm test` 覆盖协议、公式、篡改、版本与重复提交；`npm run test:e2e` 覆盖表单、草稿恢复与窄屏布局。构建后运行 `node --import tsx scripts/smoke/ui.mjs` 可验证生产资源、严格 CSP、表单和图表，不调用真实模型。

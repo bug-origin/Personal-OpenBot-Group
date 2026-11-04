@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../../apps/server/src/app';
 import type { BrainConfig } from '../../apps/server/src/config';
-import type { CoordinatorModel } from '../../apps/server/src/coordinator-model';
+import type { CoordinatorModel } from '../../apps/server/src/models/coordinator-model';
 
 export const testModelConfig: BrainConfig = {
   provider: 'openai',

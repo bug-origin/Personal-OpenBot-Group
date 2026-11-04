@@ -24,6 +24,8 @@ Codex app-server / Claude Code stream-json
 | `apps/bridge`          | 本机 CLI 检测、会话恢复、执行、进度与原生权限交互 |
 | `packages/shared`      | 实体类型、协议、Schema 与卡片校验引擎             |
 
+`apps/server/src` 按职责分组：根目录是入口与基础设施（`index.ts`、`app.ts`、`runtime.ts`、`store.ts`、`config.ts`、`local-service.ts`）；`bot/` 是 Bot 主会话、提示词组装、上下文压缩、跨对话工具、委托与注意力排序；`memory/` 是长期记忆与后台记忆整理；`models/` 是模型调用、模型与执行设置；`work/` 是任务契约、流水线、资源、看门狗、目标、交付物与项目事实；`host/` 是原生交互请求与卡片服务。测试按应用放在 `tests/server`、`tests/bridge`、`tests/shared`、`tests/scripts` 与 `tests/e2e`，真实环境验证脚本在 `scripts/smoke/`。
+
 ## 运行与身份边界
 
 安装包包含 Node.js、后台和 Bridge。Tauri 通过 `local_service` 命令获得本机连接，随机凭据以受限权限保存。服务只监听 loopback，端口冲突时另选端口，同一数据目录禁止重复启动。
@@ -81,7 +83,7 @@ HTTP 路由定义在 [app.ts](../apps/server/src/app.ts)。业务 API 要求客�
 
 SQLite 启用外键与 WAL。`apps/server/migrations/` 保存按序应用的完整历史；通过新增迁移升级已有数据，不删除旧迁移。备份和恢复步骤见[数据恢复](troubleshooting.md)。
 
-`brain.ts`、`dialogue.ts` 与 `conversations.ts` 仍被兼容调用和回归测试使用。默认应用不启用群路由；未配置主会话模型时保留明确 @ 的直接执行方式。
+应用不使用群级路由；未配置主会话模型时保留明确 @ 的直接执行方式。
 
 ## 当前范围
 

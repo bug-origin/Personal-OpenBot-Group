@@ -92,7 +92,7 @@ Worker 的公开 commentary 和结构化 progress / milestone / blocked 汇报�
 
 旧群路由／单次 JSON 对话接口仅保留供兼容和回归验证，默认桌面与源码入口使用每 Bot 的协调模型。人类所有者与群内 Bot 是独立身份；失败的 Bot 收件箱可单独重试，不重放其他 Bot 的回复。主会话模型可在运行时选择 DeepSeek、OpenAI-compatible 提供商或 Anthropic 原生工具协议，密钥单独保存在本机权限受限文件中。未配置模型时仍支持旧的明确 @ 本地执行方式。
 
-自动测试覆盖协调、注意力、生命周期，以及 tests/durable-work.test.ts 和 tests/durable-migration.test.ts 中的持续目标、跨对话委托、证据、到期检查、抢占、真实 worktree 和旧数据升级。原生协议测试验证只读执行拒绝写申请。真实只读链路验证：scripts/smoke-coordinator.mjs、scripts/smoke-attention.mjs。运行真实验证会使用已配置模型和本机 Provider，独立数据库及资源文件在临时目录中创建并清理。
+自动测试覆盖协调、注意力、生命周期，以及 tests/server/durable-work.test.ts 和 tests/server/durable-migration.test.ts 中的持续目标、跨对话委托、证据、到期检查、抢占、真实 worktree 和旧数据升级。原生协议测试验证只读执行拒绝写申请。真实只读链路验证：scripts/smoke/coordinator.mjs、scripts/smoke/attention.mjs。运行真实验证会使用已配置模型和本机 Provider，独立数据库及资源文件在临时目录中创建并清理。
 
 ## 独立目标与持续推进
 
@@ -124,4 +124,4 @@ record_application 不修改或发布文件，只核对登记时确定的目标�
 
 015_work_ownership.sql 将已有执行与委托迁入兼容目标，保留原任务 ID、对话、记忆、原生会话和在途状态。新事件、订阅、事实版本、产物版本、验证回执和目标验收均在 SQLite 持久保存。重启不会自动重放未知执行。活动记录和概览可以显示没有 Worker 的目标、下一行动、待决策原因和交付阶段。
 
-认证接口：GET /api/goals/:id/status 返回目标、关联执行和交付物；POST /api/goals/:id/stop 停止目标。活跃显式目标阻止直接删除其当前群组，需先接续到其他对话或停止。tests/work-ownership.test.ts、tests/durable-migration.test.ts 和 tests/e2e/work-goals.spec.ts 覆盖这套生命周期与升级流程。
+认证接口：GET /api/goals/:id/status 返回目标、关联执行和交付物；POST /api/goals/:id/stop 停止目标。活跃显式目标阻止直接删除其当前群组，需先接续到其他对话或停止。tests/server/work-ownership.test.ts、tests/server/durable-migration.test.ts 和 tests/e2e/work-goals.spec.ts 覆盖这套生命周期与升级流程。

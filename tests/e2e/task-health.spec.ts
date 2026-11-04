@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentJob, BridgeCommand } from '@openbot/shared';
 import { createApp } from '../../apps/server/src/app';
-import { TaskContracts } from '../../apps/server/src/task-contracts';
+import { TaskContracts } from '../../apps/server/src/work/task-contracts';
 import { testModelConfig } from './model-fixtures';
 
 test('shows task health in activity records while worker reports stay out of chat', async ({

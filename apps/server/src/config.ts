@@ -1,5 +1,5 @@
 import type { ModelProvider } from '@openbot/shared';
-import { modelProviders, normalizeModelUrl } from './model-providers.js';
+import { modelProviders, normalizeModelUrl } from './models/model-providers.js';
 
 export interface BrainConfig {
   provider: ModelProvider;
