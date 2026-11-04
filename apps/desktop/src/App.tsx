@@ -149,7 +149,7 @@ export default function App() {
             <span className="brand-logo">
               <BotIcon size={24} strokeWidth={2} />
             </span>
-            <strong>OpenBot</strong>
+            <strong>Personal OpenBot Group</strong>
           </div>
           <button
             className="search-launch"
@@ -195,15 +195,15 @@ export default function App() {
             <div className="sidebar-section-head">
               <button
                 className="sidebar-section-title"
-                aria-label="管理数字员工"
+                aria-label="管理 Bot"
                 onClick={() => {
                   setView('bots');
                   setSidebar(false);
                 }}
               >
-                我的数字员工
+                我的 Bot
               </button>
-              <IconButton label="创建数字员工" onPress={createBot}>
+              <IconButton label="创建 Bot" onPress={createBot}>
                 <Plus size={15} />
               </IconButton>
             </div>
@@ -223,7 +223,7 @@ export default function App() {
                 ))}
                 {data.bots.length > 4 && (
                   <button onClick={() => setView('bots')}>
-                    查看全部 {data.bots.length} 位员工
+                    查看全部 {data.bots.length} 位 Bot
                     <ArrowUpRight size={13} />
                   </button>
                 )}
@@ -234,9 +234,9 @@ export default function App() {
                   <BotIcon size={19} />
                 </span>
                 <div>
-                  还没有数字员工
+                  还没有 Bot
                   <small>
-                    创建数字员工
+                    创建 Bot
                     <ArrowUpRight size={11} />
                   </small>
                 </div>
@@ -301,7 +301,7 @@ export default function App() {
                     {group?.directBotId ? <MessageSquare size={19} /> : <Hash size={19} />}
                   </span>
                   <div>
-                    <h2>{group?.name ?? 'OpenBot'}</h2>
+                    <h2>{group?.name ?? 'Personal OpenBot Group'}</h2>
                     {(directBot || group?.description) && (
                       <p>
                         {directBot
@@ -324,7 +324,7 @@ export default function App() {
                   </span>
                   <div>
                     <h2>
-                      {view === 'bots' ? '我的数字员工' : view === 'settings' ? '设置' : '活动记录'}
+                      {view === 'bots' ? '我的 Bot' : view === 'settings' ? '设置' : '活动记录'}
                     </h2>
                   </div>
                 </>
@@ -433,11 +433,12 @@ export default function App() {
                           </span>
                           <h1>先配置对话模型</h1>
                           <p>
-                            数字员工需要对话模型才能理解消息和协作。配置完成后，即可创建数字员工、群组并开始聊天。
+                            Bot 需要对话模型才能理解消息和协作。配置完成后，即可创建
+                            Bot、群组并开始聊天。
                           </p>
                           <ol className="model-setup-steps" aria-label="开始使用步骤">
                             <li aria-current="step">配置对话模型</li>
-                            <li>创建数字员工</li>
+                            <li>创建 Bot</li>
                             <li>开始聊天与协作</li>
                           </ol>
                           <Button className="accent-button" onPress={configureModel}>
@@ -486,12 +487,12 @@ export default function App() {
                           <span className="workspace-empty-icon">
                             <BotIcon size={38} strokeWidth={1.4} />
                           </span>
-                          <h1>开始使用 OpenBot</h1>
-                          <p>创建数字员工开始聊天，也可以创建群组。</p>
+                          <h1>开始使用 Personal OpenBot Group</h1>
+                          <p>创建 Bot 开始聊天，也可以创建群组。</p>
                           <div className="workspace-empty-actions">
                             <Button className="accent-button" onPress={createBot}>
                               <Plus size={16} />
-                              创建数字员工
+                              创建 Bot
                             </Button>
                             <Button variant="secondary" onPress={() => createGroup()}>
                               <Hash size={16} />
@@ -527,7 +528,9 @@ export default function App() {
                   <BotIcon size={43} strokeWidth={1.4} />
                 </span>
 
-                <h1>{status === 'connecting' ? '正在连接 OpenBot' : '无法连接本地服务'}</h1>
+                <h1>
+                  {status === 'connecting' ? '正在连接 Personal OpenBot Group' : '无法连接本地服务'}
+                </h1>
                 <p>请重试连接；若仍无法连接，请重新打开应用。</p>
                 <Button className="accent-button" onPress={retry}>
                   <ArrowUpRight size={16} />
@@ -542,7 +545,7 @@ export default function App() {
               {connectionText}
             </button>
             <div>
-              <span>OpenBot Desktop</span>
+              <span>Personal OpenBot Group</span>
             </div>
           </footer>
         </main>

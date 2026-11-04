@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const bundle = join(root, 'apps/desktop/src-tauri/target/release/bundle');
-const application = join(bundle, 'macos/OpenBot.app');
-const destination = join(bundle, 'dmg', `OpenBot_${version}_${process.arch}.dmg`);
+const application = join(bundle, 'macos/Personal OpenBot Group.app');
+const destination = join(bundle, 'dmg', `Personal-OpenBot-Group_${version}_${process.arch}.dmg`);
 const identity = process.env.APPLE_SIGNING_IDENTITY;
 const profile = process.env.APPLE_NOTARY_PROFILE;
 const teamId = process.env.APPLE_TEAM_ID;
@@ -89,6 +89,7 @@ async function notarize(path, label) {
       'notarytool',
       'submit',
       path,
+      ...(process.env.APPLE_NOTARY_S3_ACCELERATION === 'false' ? ['--no-s3-acceleration'] : []),
       '--keychain-profile',
       profile,
       '--wait',
@@ -162,7 +163,7 @@ if (process.platform === 'darwin') {
     if (profile) {
       if (!identity) throw new Error('Notarization requires APPLE_SIGNING_IDENTITY');
       await verifySigningTeam(application);
-      const archive = join(staging, 'OpenBot.zip');
+      const archive = join(staging, 'Personal-OpenBot-Group.zip');
       await run('ditto', ['-c', '-k', '--keepParent', application, archive]);
       submissions.application = await notarize(archive, 'application archive');
       // ZIPs cannot carry tickets; staple the accepted application itself.
@@ -174,12 +175,12 @@ if (process.platform === 'darwin') {
     const imageSource = join(staging, 'image');
     await mkdir(imageSource);
     // Preserve macOS metadata, including the application's stapled ticket.
-    await run('ditto', [application, join(imageSource, 'OpenBot.app')]);
+    await run('ditto', [application, join(imageSource, 'Personal OpenBot Group.app')]);
     await symlink('/Applications', join(imageSource, 'Applications'));
     await run('hdiutil', [
       'create',
       '-volname',
-      'OpenBot',
+      'Personal OpenBot Group',
       '-srcfolder',
       imageSource,
       '-ov',
@@ -208,7 +209,7 @@ if (process.platform === 'darwin') {
       .digest('hex');
     await writeFile(
       join(bundle, 'dmg', 'SHA256SUMS'),
-      `${sha256}  OpenBot_${version}_${process.arch}.dmg\n`,
+      `${sha256}  Personal-OpenBot-Group_${version}_${process.arch}.dmg\n`,
     );
     await writeFile(
       join(bundle, 'dmg', 'release-metadata.json'),

@@ -83,7 +83,7 @@ export function GroupDialog({
       {confirmDelete ? (
         <div className="dialog-form">
           <p className="group-delete-description">
-            该群组的聊天记录、任务记录和群内记忆将永久删除。数字员工及各自的长期记忆会保留。
+            该群组的聊天记录、任务记录和群内记忆将永久删除。Bot 及各自的长期记忆会保留。
           </p>
           {error && (
             <p role="alert" className="form-error">
@@ -123,7 +123,7 @@ export function GroupDialog({
             multiline
           />
           <div className="form-section-label">
-            邀请数字员工 <span>可稍后添加</span>
+            邀请 Bot <span>可稍后添加</span>
           </div>
           {bots.length ? (
             <div className="bot-pick-list">
@@ -152,7 +152,7 @@ export function GroupDialog({
           ) : (
             <div className="inline-note">
               <BotIcon size={18} />
-              <span>还没有数字员工，可在创建后添加。</span>
+              <span>还没有 Bot，可在创建后添加。</span>
             </div>
           )}
           {error && (
@@ -222,7 +222,7 @@ export function BotDialog({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!data?.model?.configured) {
-      setError('请先在设置中配置对话模型，再创建数字员工。');
+      setError('请先在设置中配置对话模型，再创建 Bot。');
       return;
     }
     if (busy || avatarLoading || (avatar && !botAvatarSchema.safeParse(avatar).success)) return;
@@ -250,19 +250,20 @@ export function BotDialog({
       onClose={() => {
         if (!busy && !avatarLoading) onClose();
       }}
-      title="创建数字员工"
+      title="创建 Bot"
     >
       <form onSubmit={submit} className="dialog-form">
         <AvatarEditor
           value={avatar}
           onChange={setAvatar}
-          name={name || '数字员工'}
+          name={name || 'Bot'}
           provider={provider}
           onBusyChange={setAvatarLoading}
           disabled={busy}
+          presentation="popover"
         />
         <Field
-          label="数字员工名称"
+          label="Bot 名称"
           value={name}
           onChange={setName}
           placeholder="例如：Alice"
@@ -313,7 +314,7 @@ export function BotDialog({
           <span>
             {available.length
               ? '本地执行已就绪，创建后自动连接。'
-              : `${providerLabel[provider]} 暂不可用。使用本地执行需在本机安装 ${provider === 'codex' ? 'Codex CLI' : 'Claude Code'} 并完成账号登录。可以先创建数字员工，工具就绪后执行。`}
+              : `${providerLabel[provider]} 暂不可用。使用本地执行需在本机安装 ${provider === 'codex' ? 'Codex CLI' : 'Claude Code'} 并完成账号登录。可以先创建 Bot，工具就绪后执行。`}
           </span>
         </div>
         {error && (
@@ -337,7 +338,7 @@ export function BotDialog({
             }
             className="accent-button"
           >
-            创建数字员工
+            创建 Bot
             <ArrowRight size={16} />
           </Button>
         </div>

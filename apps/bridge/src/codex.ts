@@ -5,6 +5,7 @@ import type { AgentJob, NativeReply, NativeRequestSpec } from '@openbot/shared';
 import { codexRequest, codexReply } from './native.js';
 import { buildTurnInput } from './prompt.js';
 import { botInstructions } from './instructions.js';
+import { executionPolicy } from './auto-mode.js';
 import type { AgentCallbacks, AgentResult } from './execution.js';
 export type { AgentResult } from './execution.js';
 type Rpc = {
@@ -51,7 +52,7 @@ export class CodexExecution {
     private executable: string,
     private job: AgentJob,
     private callbacks: AgentCallbacks,
-    private options: { timeoutMs?: number } = {},
+    private options: { timeoutMs?: number; autoModeSupported?: boolean } = {},
   ) {}
   private send(message: Rpc) {
     if (!this.process || this.process.stdin.destroyed) throw new Error('Codex 连接已关闭');
@@ -272,7 +273,9 @@ export class CodexExecution {
   async run(): Promise<AgentResult> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      this.process = spawn(this.executable, ['app-server', '--stdio'], {
+      const execution = executionPolicy(this.job, this.options.autoModeSupported);
+      if (execution.reason) this.callbacks.activity?.(execution.reason);
+      this.process = spawn(this.executable, ['app-server'], {
         cwd: homedir(),
         env: agentEnvironment(),
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -334,17 +337,15 @@ export class CodexExecution {
       this.send({ method: 'initialized', params: {} });
       if (this.cancelled) return { status: 'cancelled', text: '' };
       const policy = {
-        sandbox: 'read-only',
+        sandbox: execution.automatic ? 'workspace-write' : 'read-only',
         approvalPolicy: 'on-request',
-        approvalsReviewer: 'user',
+        approvalsReviewer: execution.automatic ? 'auto_review' : 'user',
       };
       const result = await this.request(this.job.session ? 'thread/resume' : 'thread/start', {
         ...policy,
         config: { web_search: 'live' },
         developerInstructions: botInstructions(this.job),
-        ...(this.job.task.execution?.workspace
-          ? { cwd: this.job.task.execution.workspace.path }
-          : {}),
+        ...(execution.directory ? { cwd: execution.directory } : {}),
         ...(this.job.session ? { threadId: this.job.session.threadId, excludeTurns: true } : {}),
       });
       if (this.job.session && result.thread.id !== this.job.session.threadId)
@@ -359,11 +360,13 @@ export class CodexExecution {
       const started = await this.request('turn/start', {
         threadId: this.threadId,
         input: [{ type: 'text', text }],
-        ...(this.job.task.execution?.workspace
-          ? { cwd: this.job.task.execution.workspace.path }
-          : {}),
+        ...(execution.directory ? { cwd: execution.directory } : {}),
         approvalPolicy: 'on-request',
-        approvalsReviewer: 'user',
+        approvalsReviewer: policy.approvalsReviewer,
+        // Override persisted policy when resuming an older auto session in manual/read mode.
+        sandboxPolicy: execution.automatic
+          ? { type: 'workspaceWrite', writableRoots: [execution.directory!], networkAccess: false }
+          : { type: 'readOnly' },
       });
       this.turnId = started.turn.id;
       this.callbacks.started?.();

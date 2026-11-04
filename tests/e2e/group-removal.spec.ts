@@ -56,7 +56,7 @@ test('deletes a group from its top-right settings after confirmation and preserv
     const dialog = page.getByRole('dialog');
     await dialog.getByRole('button', { name: '删除群组', exact: true }).click();
     await expect(dialog).toContainText('确定删除「待删除群组」？');
-    await expect(dialog).toContainText('数字员工及各自的长期记忆会保留');
+    await expect(dialog).toContainText('Bot 及各自的长期记忆会保留');
     await page.screenshot({ path: testInfo.outputPath('delete-confirmation.png') });
     await dialog.getByRole('button', { name: '返回', exact: true }).click();
     await expect(dialog.getByLabel('群组名称')).toHaveValue('待删除群组');
@@ -79,7 +79,7 @@ test('deletes a group from its top-right settings after confirmation and preserv
     await dialog.getByRole('button', { name: '删除群组', exact: true }).click();
     await dialog.getByRole('button', { name: '确认删除', exact: true }).click();
     await expect(
-      page.getByRole('heading', { name: '开始使用 OpenBot', exact: true }),
+      page.getByRole('heading', { name: '开始使用 Personal OpenBot Group', exact: true }),
     ).toBeVisible();
     expect(instance.store.snapshot().bots).toHaveLength(1);
     expect(errors).toEqual([]);

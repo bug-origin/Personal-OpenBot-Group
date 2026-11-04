@@ -28,7 +28,7 @@ export class TaskPipelines {
               .get(id, task.groupId)) ||
           pipeline.archived_at
         )
-          throw new Error('工作管道不存在、已归档或不属于当前数字员工与对话');
+          throw new Error('工作管道不存在、已归档或不属于当前 Bot 与对话');
         const unknown = this.store.db
           .prepare(
             "SELECT r.id FROM worker_runs r JOIN task_pipeline_bindings b ON b.task_id=r.task_id WHERE b.pipeline_id=? AND r.status='unknown' AND r.id=(SELECT last.id FROM worker_runs last WHERE last.task_id=r.task_id ORDER BY last.started_at DESC,last.rowid DESC LIMIT 1) LIMIT 1",

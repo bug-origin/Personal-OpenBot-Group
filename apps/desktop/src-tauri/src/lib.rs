@@ -19,11 +19,23 @@ pub fn run() {
     tauri::Builder::default()
         .manage(LocalService::default())
         .setup(|app| {
-            let open = MenuItem::with_id(app, "open", "打开 OpenBot", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "退出 OpenBot", true, None::<&str>)?;
+            let open = MenuItem::with_id(
+                app,
+                "open",
+                "打开 Personal OpenBot Group",
+                true,
+                None::<&str>,
+            )?;
+            let quit = MenuItem::with_id(
+                app,
+                "quit",
+                "退出 Personal OpenBot Group",
+                true,
+                None::<&str>,
+            )?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
             let mut tray = TrayIconBuilder::new()
-                .tooltip("OpenBot")
+                .tooltip("Personal OpenBot Group")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -55,7 +67,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![local_service::local_service])
         .build(tauri::generate_context!())
-        .expect("failed to start OpenBot desktop")
+        .expect("failed to start Personal OpenBot Group")
         .run(|app, event| {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {

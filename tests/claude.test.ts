@@ -21,6 +21,7 @@ const fs=require('fs'),args=process.argv.slice(2),mode=${JSON.stringify(mode)};
 if(args.includes('--version')){console.log('2.1.292');process.exit(0);}
 if(args[0]==='auth'){console.log(JSON.stringify({loggedIn:mode!=='unauthenticated'}));process.exit(0);}
 if(args.includes('--help')){console.log('--restricted --safe-mode --permission-prompts --system-prompt-snapshot --replay-user-messages');process.exit(0);}
+if(args.includes('generate-json-schema'))process.exit(1);
 if(args[0]==='app-server'){let pending='';process.stdin.on('data',c=>{pending+=c;let n;while((n=pending.indexOf('\\n'))>=0){const m=JSON.parse(pending.slice(0,n));pending=pending.slice(n+1);if(m.method==='initialize')process.stdout.write(JSON.stringify({id:m.id,result:{}})+'\\n');if(m.method==='account/read')process.stdout.write(JSON.stringify({id:m.id,result:{requiresOpenaiAuth:true,account:{type:'apiKey'}}})+'\\n');}});return;}
 if(args[0]==='login')process.exit(0);
 const session=args[args.indexOf(args.includes('--resume')?'--resume':'--session-id')+1];
@@ -336,4 +337,58 @@ it('approves the exact stored tool input and never accepts client-supplied tool 
     behavior: 'allow',
     updatedInput: { file_path: 'example.txt', content: 'exact original content' },
   });
+});
+
+it('lets native auto mode review scoped actions without blanket ask rules or a filesystem-root grant', async () => {
+  const f = fixture('permission');
+  f.job.permissionMode = 'auto';
+  f.job.executionDirectory = f.directory;
+  let requests = 0;
+  const execution = new ClaudeExecution(
+    f.executable,
+    f.job,
+    {
+      session: () => {},
+      progress: () => {},
+      approval: () => {},
+      interaction: (id) => {
+        requests++;
+        setTimeout(() => execution.respond(id, { decision: 'decline' }), 0);
+      },
+    },
+    { autoModeSupported: true },
+  );
+  expect((await execution.run()).status).toBe('completed');
+  const { args, response } = JSON.parse(readFileSync(f.requests, 'utf8'));
+  expect(args[args.indexOf('--permission-mode') + 1]).toBe('auto');
+  expect(JSON.parse(args[args.indexOf('--settings') + 1])).toEqual({ permissions: { ask: [] } });
+  expect(args).not.toContain('--add-dir');
+  expect(args).not.toContain('--dangerously-skip-permissions');
+  expect(requests).toBe(1);
+  expect(response.response.behavior).toBe('deny');
+});
+
+it('keeps old CLIs in manual mode and reports the fallback', async () => {
+  const f = fixture();
+  f.job.permissionMode = 'auto';
+  f.job.executionDirectory = f.directory;
+  const activity: string[] = [];
+  expect(
+    (
+      await new ClaudeExecution(
+        f.executable,
+        f.job,
+        {
+          session: () => {},
+          progress: () => {},
+          approval: () => {},
+          activity: (text) => activity.push(text),
+        },
+        { autoModeSupported: false },
+      ).run()
+    ).status,
+  ).toBe('completed');
+  const { args } = JSON.parse(readFileSync(f.requests, 'utf8'));
+  expect(args[args.indexOf('--permission-mode') + 1]).toBe('manual');
+  expect(activity.join(' ')).toContain('不支持自动模式');
 });

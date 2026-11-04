@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { AvailableModel, ModelProvider, ModelSettingsView } from '@openbot/shared';
 import { request, type Connection } from '../lib/client';
+import { ExecutionSettings } from './ExecutionSettings';
 
 type Mutate = <T>(path: string, body?: unknown, method?: string) => Promise<T>;
 
@@ -164,12 +165,12 @@ export function SettingsView({
         </span>
         <div>
           <h1>对话模型</h1>
-          <p>所有数字员工共用此模型配置。</p>
+          <p>所有 Bot 共用此模型配置。</p>
         </div>
       </div>
       {setupRequired && !settings.enabled && (
         <p className="inline-note" role="status">
-          请先填写 API Key、选择对话模型并保存，再创建数字员工和群组，开始聊天与协作。
+          请先填写 API Key、选择对话模型并保存，再创建 Bot 和群组，开始聊天与协作。
         </p>
       )}
       <div className={`model-current ${settings.enabled ? 'configured' : ''}`}>
@@ -405,11 +406,12 @@ export function SettingsView({
           </Button>
         </div>
       </form>
+      <ExecutionSettings connection={connection} mutate={mutate} />
       {settings.enabled && onCreateBot && (
         <div className="model-setup-next">
-          <p>对话模型已就绪，接下来创建你的第一位数字员工。</p>
+          <p>对话模型已就绪，接下来创建你的第一位 Bot。</p>
           <Button className="accent-button" onPress={onCreateBot}>
-            创建数字员工
+            创建 Bot
           </Button>
         </div>
       )}

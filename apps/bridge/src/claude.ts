@@ -9,6 +9,7 @@ import type { AgentCallbacks, AgentExecution, AgentResult } from './execution.js
 import { claudeEnvironment } from './claude-environment.js';
 import { botInstructions } from './instructions.js';
 import { buildTurnInput } from './prompt.js';
+import { executionPolicy } from './auto-mode.js';
 
 const safeError = (text: string) => text.replace(/sk-[A-Za-z0-9_-]+/g, '[redacted]').slice(0, 700);
 
@@ -36,7 +37,7 @@ export class ClaudeExecution implements AgentExecution {
     private executable: string,
     private job: AgentJob,
     private callbacks: AgentCallbacks,
-    private options: { timeoutMs?: number } = {},
+    private options: { timeoutMs?: number; autoModeSupported?: boolean } = {},
   ) {
     this.sessionId = job.session?.threadId ?? randomUUID();
   }
@@ -206,6 +207,8 @@ export class ClaudeExecution implements AgentExecution {
       this.finish = resolve;
     });
     try {
+      const execution = executionPolicy(this.job, this.options.autoModeSupported);
+      if (execution.reason) this.callbacks.activity?.(execution.reason);
       const args = [
         '-p',
         '--input-format',
@@ -219,8 +222,7 @@ export class ClaudeExecution implements AgentExecution {
         '--safe-mode',
         // Resource paths come from the conversation; the launch location is not a file boundary.
         // Manual permissions below still require approval for each command and write.
-        '--add-dir',
-        parse(homedir()).root,
+        ...(!execution.automatic ? ['--add-dir', parse(homedir()).root] : []),
         '--strict-mcp-config',
         '--mcp-config',
         '{"mcpServers":{}}',
@@ -231,19 +233,21 @@ export class ClaudeExecution implements AgentExecution {
         '--allowedTools',
         'Read,Glob,Grep,WebSearch',
         '--permission-mode',
-        'manual',
+        execution.automatic ? 'auto' : 'manual',
         '--permission-prompts',
         'host',
         '--permission-prompt-tool',
         'stdio',
         '--settings',
-        '{"permissions":{"ask":["Bash","Edit","Write","WebFetch"]}}',
+        JSON.stringify({
+          permissions: { ask: execution.automatic ? [] : ['Bash', 'Edit', 'Write', 'WebFetch'] },
+        }),
         '--disable-slash-commands',
         '--system-prompt-snapshot',
         'off',
         '--append-system-prompt',
         botInstructions(this.job) +
-          '\nOpenBot forwards your native AskUserQuestion and permission requests to the human in the group. Use AskUserQuestion for clarifying questions during work. Bash, Edit and Write require the human to explicitly approve the exact operation before you proceed. Never claim a group message or a generated UI card itself granted permission. MCP, subagents and hooks remain unavailable.',
+          `\nOpenBot forwards your native AskUserQuestion and permission requests to the human in the group. Use AskUserQuestion for clarifying questions during work. ${execution.automatic ? 'Native auto mode reviews routine actions within the task directory. Native denials are authoritative; report the limitation and never bypass it by changing tools, encoding a command, or retrying in another mode.' : 'Bash, Edit and Write require the human to explicitly approve the exact operation before you proceed.'} Never claim a group message or a generated UI card itself granted permission. MCP, subagents and hooks remain unavailable.`,
         ...(this.job.session ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
       ];
       const env = claudeEnvironment();
@@ -251,7 +255,7 @@ export class ClaudeExecution implements AgentExecution {
       delete env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN;
       delete env.CLAUDE_CODE_FORWARD_SUBAGENT_TEXT;
       this.process = spawn(this.executable, args, {
-        cwd: this.job.task.execution?.workspace?.path ?? homedir(),
+        cwd: execution.directory ?? homedir(),
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: process.platform !== 'win32',

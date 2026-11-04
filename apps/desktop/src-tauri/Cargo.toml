@@ -1,6 +1,6 @@
 [package]
 name = "openbot-desktop"
-version = "1.0.1"
+version = "1.0.2"
 description = "Human and AI collaboration client"
 authors = ["OpenBot"]
 edition = "2021"

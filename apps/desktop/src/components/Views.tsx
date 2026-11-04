@@ -34,17 +34,17 @@ export function BotsView({
     <div className="page-view">
       <div className="page-title">
         <div>
-          <h1>数字员工</h1>
+          <h1>Bot</h1>
         </div>
         <Button className="accent-button" onPress={onCreate}>
           <Plus size={17} />
-          创建数字员工
+          创建 Bot
         </Button>
       </div>
       <div className="stats-strip">
         <div>
           <BotIcon size={18} />
-          <span>数字员工</span>
+          <span>Bot</span>
           <strong>{data.bots.length}</strong>
         </div>
         <div>
@@ -106,7 +106,7 @@ export function BotsView({
             <span>
               <Plus size={25} />
             </span>
-            <strong>创建数字员工</strong>
+            <strong>创建 Bot</strong>
           </button>
         </div>
       ) : (
@@ -119,11 +119,11 @@ export function BotsView({
               <Sparkles size={20} />
             </i>
           </div>
-          <h2>还没有数字员工</h2>
+          <h2>还没有 Bot</h2>
 
           <Button className="accent-button" onPress={onCreate}>
             <Plus size={17} />
-            创建第一位数字员工
+            创建第一位 Bot
           </Button>
         </div>
       )}
@@ -260,10 +260,10 @@ export function SearchDialog({
         <Search size={19} />
         <input
           autoFocus
-          aria-label="搜索群组、数字员工和消息"
+          aria-label="搜索群组、Bot 和消息"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索群组、数字员工和消息…"
+          placeholder="搜索群组、Bot 和消息…"
         />
         <kbd>ESC</kbd>
       </div>
@@ -291,7 +291,7 @@ export function SearchDialog({
         )}
         {bots.length > 0 && (
           <>
-            <h4>数字员工</h4>
+            <h4>Bot</h4>
             {bots.map((b) => (
               <button
                 key={b.id}

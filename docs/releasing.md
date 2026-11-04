@@ -52,11 +52,15 @@ APPLE_NOTARY_PROFILE='openbot-notary' npm run tauri:build
 
 脚本核对签名团队，签名内置 Node.js、原生模块和应用，分别公证应用与 DMG、附加票据并执行系统安装检查。产物位于 `apps/desktop/src-tauri/target/release/bundle/dmg/`：
 
-- `OpenBot_X.Y.Z_arm64.dmg`
+- `Personal-OpenBot-Group_X.Y.Z_arm64.dmg`
 - `SHA256SUMS`
 - `release-metadata.json`，记录签名、公证及文件摘要。
 
 若签名包已构建完成，可使用相同环境变量运行 `npm run tauri:build -- --notarize-only`。该模式复用现有应用，仅完成公证与重新生成 DMG；应用签名必须已属于指定团队。
+
+若公证上传遇到连接超时，可额外设置 `APPLE_NOTARY_S3_ACCELERATION=false`，切换为普通 S3 上传，再使用 `--notarize-only` 重试，无需重新编译。
+
+若本机使用系统网络代理，上传进程可能还需要继承对应的 `HTTP_PROXY`、`HTTPS_PROXY` 及小写同名变量。仅对本次构建设置即可，不必修改系统代理。
 
 ## GitHub Release
 

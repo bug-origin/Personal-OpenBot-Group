@@ -26,6 +26,8 @@ export function createStore(path: string) {
     '014_durable_work.sql',
     '015_work_ownership.sql',
     '016_bot_avatars.sql',
+    '017_message_attention_order.sql',
+    '018_bot_context.sql',
   ]) {
     const hasHistory = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'")

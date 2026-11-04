@@ -12,6 +12,7 @@ import {
   type AttentionModel,
 } from '../apps/server/src/attention-model';
 import type { CoordinatorMessage, CoordinatorModel } from '../apps/server/src/coordinator-model';
+import { MessageAttention } from '../apps/server/src/message-attention';
 
 const token = 'isolated-attention-test-token';
 const dirs: string[] = [];
@@ -82,10 +83,14 @@ async function send(groupId: string, content: string, replyTo?: string) {
 }
 async function idle() {
   await expect
-    .poll(() =>
-      instance!.store.db
-        .prepare("SELECT count(*) AS n FROM dialogue_inbox WHERE status IN ('queued','processing')")
-        .get(),
+    .poll(
+      () =>
+        instance!.store.db
+          .prepare(
+            "SELECT count(*) AS n FROM dialogue_inbox WHERE status IN ('queued','processing')",
+          )
+          .get(),
+      { timeout: 5000 },
     )
     .toEqual({ n: 0 });
 }
@@ -111,6 +116,288 @@ afterEach(async () => {
   instance = undefined;
   vi.unstubAllGlobals();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+it('staggers each message with shared random weights and includes the first reply in later attention and dialogue', async () => {
+  const arrivals: { input: AttentionInput; at: number }[] = [];
+  const main = vi.fn<CoordinatorModel>(async (messages) => {
+    const data = context(messages);
+    return say(data.responseOrder.weight === 1 ? '我先提个方向。' : '接着刚才的方向补充。');
+  });
+  await setup(main, async (input) => {
+    if (input.message.actor.type !== 'human') return { wake: false };
+    arrivals.push({ input, at: Date.now() });
+    return { wake: true };
+  });
+  const ids = [await bot('BB'), await bot('DEV')];
+  const source = await send(await group(ids), '你俩先聊聊');
+  await idle();
+  expect(arrivals).toHaveLength(2);
+  expect(arrivals.map(({ input }) => input.responseOrder?.weight)).toEqual([1, 2]);
+  expect(arrivals[1].at - arrivals[0].at).toBeGreaterThanOrEqual(150);
+  const first = arrivals[0].input;
+  const second = arrivals[1].input;
+  expect(first.responseOrder?.participants.map((p) => p.id).sort()).toEqual(ids.sort());
+  expect(first.responseOrder?.participants.map((p) => p.weight)).toEqual([1, 2]);
+  expect(second.responseOrder?.participants.map((p) => [p.id, p.weight])).toEqual(
+    first.responseOrder?.participants.map((p) => [p.id, p.weight]),
+  );
+  expect(second.responseOrder?.participants[0].status).toBe('replied');
+  expect(second.messagesSinceSource).toContainEqual(
+    expect.objectContaining({ content: '我先提个方向。', replyTo: source.id }),
+  );
+  const secondTurn = context(main.mock.calls[1][0]);
+  expect(secondTurn.responseOrder.weight).toBe(2);
+  expect(secondTurn.messagesSinceSource).toContainEqual(
+    expect.objectContaining({ content: '我先提个方向。' }),
+  );
+});
+
+it('uses weights as advice and lets a later Bot answer while the earlier decision is still pending', async () => {
+  let release!: () => void;
+  const arrivals: AttentionInput[] = [];
+  const main = vi.fn<CoordinatorModel>(async () => say('我有需要补充的信息。'));
+  await setup(main, async (input, signal) => {
+    if (input.message.actor.type !== 'human') return { wake: false };
+    arrivals.push(input);
+    if (input.responseOrder?.weight === 1)
+      await new Promise<void>((resolve) => {
+        release = resolve;
+        signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+    return { wake: input.responseOrder?.weight === 2 };
+  });
+  await send(await group([await bot('BB'), await bot('DEV')]), '各自判断是否需要补充');
+  try {
+    await expect.poll(() => main.mock.calls.length, { timeout: 2000 }).toBe(1);
+    expect(arrivals.map((input) => input.responseOrder?.weight)).toEqual([1, 2]);
+    expect(arrivals[1].responseOrder?.participants[0].status).toBe('considering');
+    expect(arrivals[1].messagesSinceSource).toEqual([]);
+    expect(context(main.mock.calls[0][0]).responseOrder.weight).toBe(2);
+    expect(context(main.mock.calls[0][0]).messagesSinceSource).toEqual([]);
+  } finally {
+    release?.();
+  }
+  await idle();
+  expect(main).toHaveBeenCalledTimes(1);
+});
+
+it('includes a reply arriving during attention when the later Bot enters its main conversation', async () => {
+  let release!: () => void;
+  let secondAttention: AttentionInput | undefined;
+  const main = vi.fn<CoordinatorModel>(async (messages, signal) => {
+    if (context(messages).responseOrder.weight !== 1) return say('接着刚才的建议讨论。');
+    return new Promise((resolve) => {
+      release = () => resolve(say('注意力判断期间发出的建议。'));
+      signal.addEventListener('abort', () => resolve(empty()), { once: true });
+    });
+  });
+  await setup(main, async (input) => {
+    if (input.message.actor.type !== 'human') return { wake: false };
+    if (input.responseOrder?.weight === 2) {
+      secondAttention = input;
+      release();
+      await expect
+        .poll(() =>
+          instance!.store
+            .snapshot()
+            .messages.some((m) => m.content === '注意力判断期间发出的建议。'),
+        )
+        .toBe(true);
+    }
+    return { wake: true };
+  });
+  await send(await group([await bot('BB'), await bot('DEV')]), '你们讨论一下');
+  await idle();
+  expect(secondAttention?.messagesSinceSource).toEqual([]);
+  const laterTurn = context(
+    main.mock.calls.find(([messages]) => context(messages).responseOrder.weight === 2)![0],
+  );
+  expect(laterTurn.messagesSinceSource).toContainEqual(
+    expect.objectContaining({ content: '注意力判断期间发出的建议。' }),
+  );
+  expect(laterTurn.responseOrder.participants[0].status).toBe('replied');
+});
+
+it('keeps overdue attention slots separated instead of starting them together', async () => {
+  const arrivals: number[] = [];
+  await setup(
+    async () => empty(),
+    async () => {
+      arrivals.push(Date.now());
+      return { wake: false };
+    },
+  );
+  const source = await send(await group([await bot('BB'), await bot('DEV')]), '初始消息');
+  await idle();
+  arrivals.length = 0;
+  const message = { ...source, id: randomUUID(), timestamp: new Date().toISOString() };
+  instance!.store.insertMessage(message);
+  new MessageAttention(instance!.store).prepare(message);
+  instance!.store.db
+    .prepare('UPDATE message_attention_order SET eligible_at=eligible_at-60000 WHERE message_id=?')
+    .run(message.id);
+  instance!.runtime.accept(message);
+  await idle();
+  expect(arrivals).toHaveLength(2);
+  expect(arrivals[1] - arrivals[0]).toBeGreaterThanOrEqual(150);
+});
+
+it('draws a new permutation for every message and preserves weights and due times across restart', async () => {
+  const path = await setup(
+    async () => empty(),
+    async () => ({ wake: false }),
+  );
+  const ids = [await bot('BB'), await bot('DEV'), await bot('QA')];
+  const source = await send(await group(ids), '起点');
+  await idle();
+  let reverse = false;
+  const random = vi.fn((max: number) => (reverse ? 0 : max - 1));
+  const ordering = new MessageAttention(instance!.store, random);
+  const originalOrder = instance!.store
+    .snapshot()
+    .groups.find((g) => g.id === source.groupId)!.botIds;
+  const makeMessage = () => {
+    const message = { ...source, id: randomUUID(), timestamp: new Date().toISOString() };
+    instance!.store.insertMessage(message);
+    return message;
+  };
+  const first = makeMessage();
+  ordering.prepare(first);
+  const firstOrder = ordering.view(first.id, ids[0])!;
+  expect(firstOrder.participants.map((p) => p.id)).toEqual(originalOrder);
+  reverse = true;
+  const second = makeMessage();
+  ordering.prepare(second);
+  expect(ordering.view(second.id, ids[0])!.participants.map((p) => p.id)).not.toEqual(
+    originalOrder,
+  );
+  const readSchedule = () =>
+    instance!.store.db
+      .prepare('SELECT * FROM message_attention_order WHERE message_id=? ORDER BY weight')
+      .all(first.id);
+  const saved = readSchedule();
+  random.mockClear();
+  ordering.prepare(first);
+  expect(random).not.toHaveBeenCalled();
+  await instance!.app.close();
+  instance = undefined;
+  await setup(
+    async () => empty(),
+    async () => ({ wake: false }),
+    path,
+  );
+  expect(readSchedule()).toEqual(saved);
+  const restored = new MessageAttention(instance!.store, () => {
+    throw new Error('Must not draw again');
+  });
+  restored.prepare(first);
+  expect(restored.view(first.id, ids[0])?.participants).toEqual(firstOrder.participants);
+});
+
+it('assigns unique random weights to every recipient in a larger group for human and Bot messages', async () => {
+  await setup(
+    async () => empty(),
+    async () => ({ wake: false }),
+  );
+  const ids = [];
+  for (let index = 0; index < 12; index++) ids.push(await bot(`Member${index}`));
+  const groupId = await group(ids);
+  const ordering = new MessageAttention(instance!.store);
+  for (const sender of ['user_local', ids[0]]) {
+    const source: Message = {
+      id: randomUUID(),
+      groupId,
+      senderId: sender,
+      senderType: sender === 'user_local' ? 'human' : 'bot',
+      content: '大家一起讨论',
+      mentions: [],
+      replyTo: null,
+      timestamp: new Date().toISOString(),
+      messageType: 'text',
+      correlationId: randomUUID(),
+    };
+    instance!.store.insertMessage(source);
+    ordering.prepare(source);
+    const recipients = ids.filter((id) => id !== sender);
+    const expectedWeights = recipients.map((_, index) => index + 1);
+    const shared = ordering.view(source.id, recipients[0])!.participants;
+    expect(shared).toHaveLength(recipients.length);
+    expect(shared.map((p) => p.id).sort()).toEqual([...recipients].sort());
+    expect(shared.map((p) => p.weight)).toEqual(expectedWeights);
+    for (const recipient of recipients) {
+      const own = ordering.view(source.id, recipient)!;
+      expect(own.weight).toBe(shared.find((p) => p.id === recipient)!.weight);
+      expect(own.participants).toEqual(shared);
+    }
+    const times = shared.map((p) => ordering.eligibleAt(source.id, p.id)!);
+    for (let index = 1; index < times.length; index++) {
+      expect(times[index] - times[index - 1]).toBeGreaterThanOrEqual(200);
+      expect(times[index] - times[index - 1]).toBeLessThanOrEqual(400);
+    }
+    if (source.senderType === 'bot') expect(ordering.view(source.id, sender)).toBeUndefined();
+  }
+});
+
+it('restores a deferred recipient without repeating the first decision or drawing a new order', async () => {
+  const first = vi.fn<AttentionModel>(async () => ({ wake: false }));
+  const path = await setup(async () => empty(), first);
+  const source = await send(await group([await bot('BB'), await bot('DEV')]), '恢复等待中的判断');
+  await expect.poll(() => first.mock.calls.length).toBe(1);
+  const saved = instance!.store.db
+    .prepare(
+      'SELECT message_id,bot_id,weight,eligible_at FROM message_attention_order WHERE message_id=? ORDER BY weight',
+    )
+    .all(source.id);
+  await instance!.app.close();
+  instance = undefined;
+  const next = vi.fn<AttentionModel>(async () => ({ wake: false }));
+  await setup(async () => empty(), next, path);
+  await idle();
+  expect(first).toHaveBeenCalledTimes(1);
+  expect(next).toHaveBeenCalledTimes(1);
+  expect(next.mock.calls[0][0].responseOrder?.weight).toBe(2);
+  expect(
+    instance!.store.db
+      .prepare(
+        'SELECT message_id,bot_id,weight,eligible_at FROM message_attention_order WHERE message_id=? ORDER BY weight',
+      )
+      .all(source.id),
+  ).toEqual(saved);
+});
+
+it('refreshes context on attention retry without rerolling the message weights', async () => {
+  const seen: AttentionInput[] = [];
+  let colleagueId: string;
+  await setup(
+    async () => empty(),
+    async (input) => {
+      if (input.message.actor.type !== 'human') return { wake: false };
+      seen.push(input);
+      if (
+        input.responseOrder?.weight === 1 &&
+        seen.filter((i) => i.bot.id === input.bot.id).length === 1
+      ) {
+        const source = instance!.store.snapshot().messages.find((m) => m.id === input.message.id)!;
+        insertBot(source, colleagueId, '重试期间出现的讨论内容');
+        throw new Error('temporary failure');
+      }
+      return { wake: false };
+    },
+  );
+  const ids = [await bot('BB'), await bot('DEV')];
+  colleagueId = ids[0];
+  await send(await group(ids), '重试时继续看上下文');
+  await idle();
+  const retries = seen.filter((i) => i.responseOrder?.weight === 1);
+  expect(retries).toHaveLength(2);
+  expect(retries[1].responseOrder?.participants.map((p) => [p.id, p.weight])).toEqual(
+    retries[0].responseOrder?.participants.map((p) => [p.id, p.weight]),
+  );
+  expect(retries[0].messagesSinceSource).toEqual([]);
+  expect(retries[1].messagesSinceSource).toContainEqual(
+    expect.objectContaining({ content: '重试期间出现的讨论内容' }),
+  );
 });
 
 it('keeps a false decision out of the main model, tools, tasks and memory while preserving the source', async () => {
@@ -642,4 +929,64 @@ it('uses Anthropic’s tool-free native protocol and checks its completion reaso
   await expect(model(attentionInput, new AbortController().signal)).rejects.toThrow(
     '注意力模型返回不完整',
   );
+});
+
+it('runs attention when a Bot quotes a colleague card to remind the human, rather than treating the quote as an address', async () => {
+  const main = vi.fn<CoordinatorModel>(async () => empty());
+  const attention = vi.fn<AttentionModel>(async () => ({ wake: false }));
+  await setup(main, attention);
+  const bob = await bot('Bob'),
+    star = await bot('Star');
+  const g = await group([bob, star]);
+  const source = await send(g, '@Star 给我一张选择卡片');
+  await idle();
+  const card = insertBot(source, star, '卡片在你上方，三个问题都只需单选。');
+  const reminder = insertBot(card, bob, '无需我再插话：三个决定都在等你，选完我就开始搭骨架。');
+  main.mockClear();
+  attention.mockClear();
+  instance!.runtime.accept(reminder);
+  await idle();
+  expect(attention).toHaveBeenCalledTimes(1);
+  expect(attention.mock.calls[0][0]).toMatchObject({
+    bot: { id: star },
+    message: { id: reminder.id, actor: { type: 'bot', id: bob } },
+    replyTarget: { senderId: star },
+  });
+  expect(main).not.toHaveBeenCalled();
+  expect(
+    instance!.store.db
+      .prepare(
+        'SELECT a.status,a.wake,a.attempts FROM attention_decisions a JOIN dialogue_inbox i ON i.id=a.inbox_id WHERE i.source_message_id=? AND i.bot_id=?',
+      )
+      .get(reminder.id, star),
+  ).toEqual({ status: 'completed', wake: 0, attempts: 1 });
+});
+
+it('lets an admitted Bot explicitly stay silent and finish without a final message or a colleague wake-up', async () => {
+  const main = vi.fn<CoordinatorModel>(async () => call('stay_silent', {}));
+  const attention = vi.fn<AttentionModel>(async () => ({ wake: true }));
+  await setup(main, attention);
+  const bob = await bot('Bob'),
+    star = await bot('Star');
+  const source = await send(await group([bob, star]), '先讨论方案');
+  await idle();
+  const reminder = insertBot(source, bob, '卡片在上面，等用户选完我们再做。');
+  main.mockClear();
+  attention.mockClear();
+  instance!.runtime.accept(reminder);
+  await idle();
+  expect(main).toHaveBeenCalledTimes(1);
+  expect(context(main.mock.calls[0][0]).bot.id).toBe(star);
+  expect(attention).toHaveBeenCalledTimes(1);
+  expect(instance!.store.snapshot().messages.filter((m) => m.senderType === 'bot')).toEqual([
+    reminder,
+  ]);
+  expect(
+    instance!.store.db
+      .prepare(
+        'SELECT status FROM coordinator_turns WHERE inbox_id=(SELECT id FROM dialogue_inbox WHERE source_message_id=? AND bot_id=?)',
+      )
+      .get(reminder.id, star),
+  ).toEqual({ status: 'completed' });
+  expect(jobs()).toHaveLength(0);
 });

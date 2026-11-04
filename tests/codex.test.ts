@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { AgentJob } from '@openbot/shared';
@@ -17,6 +17,7 @@ function fixture(stalled = false) {
     executable,
     `#!/usr/bin/env node
 const fs=require('fs');let buffer='';function send(m){process.stdout.write(JSON.stringify(m)+'\\n');}
+if(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['app-server']))process.exit(2);
 process.stdin.on('data',chunk=>{buffer+=chunk;let i;while((i=buffer.indexOf('\\n'))>=0){const m=JSON.parse(buffer.slice(0,i));buffer=buffer.slice(i+1);fs.appendFileSync(${JSON.stringify(requests)},JSON.stringify(m)+'\\n');if(m.method==='initialize')send({id:m.id,result:{}});if(m.method==='thread/start'||m.method==='thread/resume')send({id:m.id,result:{thread:{id:'native-test-thread'}}});if(m.method==='turn/start'){send({id:m.id,result:{turn:{id:'native-test-turn'}}});send({method:'item/started',params:{threadId:'native-test-thread',item:{type:'agentMessage',id:'commentary',phase:'commentary',text:'working'}}});${stalled ? '' : `setTimeout(()=>{send({method:'item/completed',params:{threadId:'native-test-thread',item:{type:'agentMessage',id:'final',phase:'final_answer',text:'final answer'}}});send({method:'turn/completed',params:{threadId:'native-test-thread',turn:{id:'native-test-turn',status:'completed'}}});},40);`}}}});
 setInterval(()=>{},1000);
 `,
@@ -194,4 +195,68 @@ it('resumes a native conversation with only changes not yet accepted by that thr
   const text = frames.find((m) => m.method === 'turn/start').params.input[0].text;
   expect(text).toBe('这次只检查缓存清理的调用点。');
   expect(text).not.toMatch(/原始|已经确认过|群聊|taskAssignment|correlationId/);
+});
+
+it('uses scoped workspace writes and native automatic review on every resumed turn', async () => {
+  const f = fixture();
+  const directory = realpathSync(f.directory);
+  f.job.permissionMode = 'auto';
+  f.job.executionDirectory = f.directory;
+  f.job.session = { threadId: 'native-test-thread', lastMessageId: null };
+  const execution = new CodexExecution(
+    f.executable,
+    f.job,
+    {
+      session: () => {},
+      progress: () => {},
+      approval: () => {},
+    },
+    { autoModeSupported: true },
+  );
+  expect((await execution.run()).status).toBe('completed');
+  const frames = readFileSync(f.requests, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  expect(frames.find((m) => m.method === 'thread/resume').params).toMatchObject({
+    sandbox: 'workspace-write',
+    approvalsReviewer: 'auto_review',
+    cwd: directory,
+  });
+  expect(frames.find((m) => m.method === 'turn/start').params).toMatchObject({
+    approvalsReviewer: 'auto_review',
+    cwd: directory,
+    sandboxPolicy: { type: 'workspaceWrite', writableRoots: [directory], networkAccess: false },
+  });
+});
+
+it('overrides a persisted automatic session when dispatch becomes read-only', async () => {
+  const f = fixture();
+  f.job.permissionMode = 'auto';
+  f.job.resourceMode = 'read';
+  f.job.executionDirectory = f.directory;
+  f.job.session = { threadId: 'native-test-thread', lastMessageId: null };
+  expect(
+    (
+      await new CodexExecution(
+        f.executable,
+        f.job,
+        {
+          session: () => {},
+          progress: () => {},
+          approval: () => {},
+        },
+        { autoModeSupported: true },
+      ).run()
+    ).status,
+  ).toBe('completed');
+  const frames = readFileSync(f.requests, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  expect(frames.find((m) => m.method === 'thread/resume').params.sandbox).toBe('read-only');
+  expect(frames.find((m) => m.method === 'turn/start').params).toMatchObject({
+    approvalsReviewer: 'user',
+    sandboxPolicy: { type: 'readOnly' },
+  });
 });

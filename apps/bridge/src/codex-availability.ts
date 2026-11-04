@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { homedir } from 'node:os';
 import { agentEnvironment } from './codex.js';
 
 type Availability = { available: boolean; reason?: string };
@@ -11,19 +12,30 @@ type Availability = { available: boolean; reason?: string };
 export function codexAvailability(
   executable: string,
   env: NodeJS.ProcessEnv,
-  timeoutMs = 10000,
+  timeouts: number | { initializeMs?: number; accountMs?: number } = {},
 ): Promise<Availability> {
   return new Promise((resolve) => {
-    const child = spawn(executable, ['app-server', '--stdio'], {
+    // Stdio is the default transport, including on CLIs without the --stdio alias.
+    const child = spawn(executable, ['app-server'], {
+      cwd: homedir(),
       env: agentEnvironment(env),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let outcome: Availability | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
-    const timer = setTimeout(
-      () => finish({ available: false, reason: 'Codex 配置检查超时，请检查本地 CLI' }),
-      timeoutMs,
-    );
+    let phase: 'initialize' | 'account' = 'initialize';
+    const initializeMs = typeof timeouts === 'number' ? timeouts : (timeouts.initializeMs ?? 30000);
+    const accountMs = typeof timeouts === 'number' ? timeouts : (timeouts.accountMs ?? 10000);
+    let timer = setTimeout(() => timedOut(), initializeMs);
+    function timedOut() {
+      finish({
+        available: false,
+        reason:
+          phase === 'initialize'
+            ? 'Codex 启动握手超时，请检查本地 CLI 及其配置'
+            : 'Codex 已启动，但读取账号状态超时，请检查本地 CLI 的账号配置',
+      });
+    }
     function finish(result: Availability) {
       if (outcome) return;
       outcome = result;
@@ -56,11 +68,15 @@ export function codexAvailability(
           return;
         }
         if (message.id !== 1 && message.id !== 2) return;
+        if (message.id !== (phase === 'initialize' ? 1 : 2)) return;
         if (message.error) {
           finish({ available: false, reason: '无法检查 Codex 原生认证配置，请检查或更新 CLI' });
           return;
         }
         if (message.id === 1) {
+          phase = 'account';
+          clearTimeout(timer);
+          timer = setTimeout(() => timedOut(), accountMs);
           send({ method: 'initialized', params: {} });
           send({ id: 2, method: 'account/read', params: { refreshToken: false } });
           return;

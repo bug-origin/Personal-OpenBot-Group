@@ -20,7 +20,8 @@
 
 ## 版本说明
 
+- [v1.0.2](releases/v1.0.2.md)
 - [v1.0.1](releases/v1.0.1.md)
 - [v1.0.0](releases/v1.0.0.md)
 
-文档描述已实现行为。版本是否已公开、可下载的安装包及校验和，以 [GitHub Releases](https://github.com/bug-origin/Personal-Agent-Group/releases) 为准。
+文档描述已实现行为。版本是否已公开、可下载的安装包及校验和，以 [GitHub Releases](https://github.com/bug-origin/Personal-OpenBot-Group/releases) 为准。

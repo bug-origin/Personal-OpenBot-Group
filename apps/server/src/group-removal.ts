@@ -37,7 +37,7 @@ export function removeGroup(store: Store, id: string) {
         )
         .get(id)
     )
-      fail(409, '数字员工正在处理群内消息，请稍后再删除群组');
+      fail(409, 'Bot 正在处理群内消息，请稍后再删除群组');
 
     // A conversation may be deleted without destroying work explicitly linked elsewhere.
     const retained = db

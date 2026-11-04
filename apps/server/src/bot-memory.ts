@@ -24,7 +24,7 @@ export type MemoryInput = {
 };
 const select =
   'SELECT id,key,content,scope,group_id AS groupId,source_message_id AS sourceMessageId,updated_at AS updatedAt,provenance,importance,expires_at AS expiresAt FROM bot_memory';
-function terms(query: string) {
+export function memoryTerms(query: string) {
   const tokens = query.toLowerCase().match(/[a-z0-9_-]{2,}|[\p{Script=Han}]+/gu) ?? [];
   return [
     ...new Set(
@@ -40,13 +40,13 @@ function terms(query: string) {
 /** Scoped recall, explicit provenance and reversible corrections, without another database. */
 export class BotMemory {
   constructor(private store: Store) {}
-  recall(botId: string, groupId: string, query = '', limit = 20) {
+  recall(botId: string, groupId: string | undefined, query = '', limit = 20) {
     const rows = this.store.db
       .prepare(
-        `${select} WHERE bot_id=? AND state='active' AND (expires_at IS NULL OR expires_at>?) AND (scope='bot' OR group_id=?) ORDER BY updated_at DESC`,
+        `${select} WHERE bot_id=? AND state='active' AND (expires_at IS NULL OR expires_at>?) AND (scope='bot' OR group_id IN (SELECT group_id FROM group_bots WHERE bot_id=? AND (? IS NULL OR group_id=?))) ORDER BY updated_at DESC`,
       )
-      .all(botId, new Date().toISOString(), groupId) as Memory[];
-    const words = terms(query);
+      .all(botId, new Date().toISOString(), botId, groupId ?? null, groupId ?? null) as Memory[];
+    const words = memoryTerms(query);
     return rows
       .map((m, i) => {
         const haystack = `${m.key} ${m.content}`.toLowerCase();
@@ -139,10 +139,12 @@ export class BotMemory {
       return { saved: true, memoryId: id, corrected: Boolean(old) };
     })();
   }
-  forget(botId: string, groupId: string, id: string) {
+  forget(botId: string, groupId: string | undefined, id: string) {
     const memory = this.store.db
-      .prepare(`${select} WHERE id=? AND bot_id=? AND (scope='bot' OR group_id=?)`)
-      .get(id, botId, groupId) as Memory | undefined;
+      .prepare(
+        `${select} WHERE id=? AND bot_id=? AND (scope='bot' OR group_id IN (SELECT group_id FROM group_bots WHERE bot_id=? AND (? IS NULL OR group_id=?)))`,
+      )
+      .get(id, botId, botId, groupId ?? null, groupId ?? null) as Memory | undefined;
     if (!memory) throw new Error('记忆不存在或不属于当前范围');
     this.store.db
       .prepare('INSERT INTO bot_memory_revisions VALUES(?,?,?,?,?,?,?)')

@@ -48,7 +48,7 @@ export function GoalCard({
       <p>{goal.title}</p>
       <small>
         <BotIcon size={12} />
-        {bot?.name ?? '数字员工'}
+        {bot?.name ?? 'Bot'}
       </small>
       <div className="task-progress">
         {!['completed', 'cancelled'].includes(goal.state) && goal.nextAction && (
@@ -98,7 +98,7 @@ export function TaskCard({
       <p>{task.input}</p>
       <small>
         <BotIcon size={12} />
-        {bot?.name ?? '数字员工'}
+        {bot?.name ?? 'Bot'}
       </small>
       {task.execution && (
         <div className="task-progress">
@@ -224,7 +224,7 @@ export function Overview({
         {!group.directBotId && (
           <button className="invite-bot" onClick={bots.length ? onMembers : onBot}>
             <Plus size={15} />
-            {bots.length ? '管理成员' : '添加数字员工'}
+            {bots.length ? '管理成员' : '添加 Bot'}
             <ArrowUpRight size={14} />
           </button>
         )}

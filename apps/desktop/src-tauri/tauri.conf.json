@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "OpenBot",
-  "version": "1.0.1",
+  "productName": "Personal OpenBot Group",
+  "version": "1.0.2",
   "identifier": "com.openbot.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "OpenBot",
+        "title": "Personal OpenBot Group",
         "width": 1440,
         "height": 940,
         "minWidth": 840,

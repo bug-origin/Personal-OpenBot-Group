@@ -5,14 +5,14 @@ test('selects the execution tool when creating a bot and saves changes while off
 }, testInfo) => {
   await page.goto('/');
   const name = `Local_${Date.now().toString().slice(-7)}`;
-  await page.getByRole('button', { name: '创建数字员工', exact: true }).first().click();
+  await page.getByRole('button', { name: '创建 Bot', exact: true }).first().click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('数字员工名称').fill(name);
+  await dialog.getByLabel('Bot 名称').fill(name);
   await dialog.getByRole('radio', { name: 'Claude Code', exact: true }).check();
   await expect(dialog.getByText(/Claude Code 暂不可用/)).toBeVisible();
-  await dialog.getByRole('button', { name: '创建数字员工', exact: true }).click();
+  await dialog.getByRole('button', { name: '创建 Bot', exact: true }).click();
   await expect(dialog).not.toBeVisible();
-  await page.getByRole('button', { name: '管理数字员工', exact: true }).first().click();
+  await page.getByRole('button', { name: '管理 Bot', exact: true }).first().click();
   const profile = page
     .locator('.bot-profile')
     .filter({ has: page.getByRole('heading', { name, exact: true }) });
@@ -28,7 +28,7 @@ test('selects the execution tool when creating a bot and saves changes while off
   await dialog.getByRole('button', { name: '保存执行设置' }).click();
   await expect(dialog).not.toBeVisible();
   await page.reload();
-  await page.getByRole('button', { name: '管理数字员工', exact: true }).first().click();
+  await page.getByRole('button', { name: '管理 Bot', exact: true }).first().click();
   await profile.getByRole('button', { name: '查看执行状态' }).click();
   await expect(dialog.getByLabel('执行工具')).toHaveValue('codex');
   await page.screenshot({

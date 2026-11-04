@@ -44,16 +44,16 @@ test('opens a persistent one-to-one chat from a bot and replies without @ or gro
       { url, token },
     );
     await page.goto('/');
-    await page.getByRole('button', { name: '创建数字员工', exact: true }).first().click();
+    await page.getByRole('button', { name: '创建 Bot', exact: true }).first().click();
     const creation = page.getByRole('dialog');
-    await creation.getByLabel('数字员工名称').fill('DirectBob');
+    await creation.getByLabel('Bot 名称').fill('DirectBob');
     await expect(creation.getByText(/创建后自动连接/)).toBeVisible();
-    await creation.getByRole('button', { name: '创建数字员工', exact: true }).click();
+    await creation.getByRole('button', { name: '创建 Bot', exact: true }).click();
     await expect(creation).not.toBeVisible();
 
     const bot = instance.store.snapshot().bots[0];
     expect(bot).toMatchObject({ name: 'DirectBob', bridgeId, status: 'idle' });
-    await page.getByRole('button', { name: '管理数字员工', exact: true }).first().click();
+    await page.getByRole('button', { name: '管理 Bot', exact: true }).first().click();
     await page.getByRole('button', { name: '单独聊天', exact: true }).click();
 
     await expect(

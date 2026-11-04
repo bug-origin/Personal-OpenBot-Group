@@ -105,8 +105,8 @@ export const botSchema = z.object({
   name: z
     .string()
     .trim()
-    .min(1, '请填写数字员工名称')
-    .max(32, '数字员工名称不能超过 32 个字符')
+    .min(1, '请填写 Bot 名称')
+    .max(32, 'Bot 名称不能超过 32 个字符')
     .regex(/^[\p{L}\p{N}_-]{1,32}$/u, '名称仅支持文字、数字、下划线和连字符'),
   description: z.string().trim().max(240, '职责描述不能超过 240 个字符').default(''),
   provider: z.enum(['claude-code', 'codex']),

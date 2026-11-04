@@ -151,7 +151,15 @@ it.each([
   [' (这条是回给 BB 的选择，我不接。) ', false],
   ['我先不参与。', false],
   ['（保持沉默）', false],
+  [
+    '无需回复——这是 Bob 在催促用户做选择，并没有新的信息需要我处理；卡片已经在群里，等用户选定。',
+    false,
+  ],
+  ['无须我再回复：没有需要我处理的变更，等用户确认。', false],
+  ['不需要回应：我暂时不参与，等用户决定。', false],
   ['我不接这个任务，因为目前缺少项目目录。', true],
+  ['无需回复——这封是垃圾邮件，直接删除。', true],
+  ['无需回复——没有新的信息需要我处理。不过发现接口返回了 500，需要修复。', true],
   ['这条接口返回错误，需要检查鉴权配置。', true],
 ])(
   'publishes substantive answers but suppresses silence narration: %s',
@@ -186,11 +194,19 @@ it('excludes earlier Bot silence narration from context while preserving chat hi
     replyTo: previous.id,
     timestamp: new Date().toISOString(),
   });
+  for (let i = 0; i < 14; i++)
+    instance!.store.insertMessage({
+      ...previous,
+      id: randomUUID(),
+      content: `后续正常讨论 ${i}`,
+      timestamp: new Date().toISOString(),
+    });
   await message(g, '继续');
   await idle();
   expect(input(model.mock.calls.at(-1)![0]).recentMessages).not.toContainEqual(
     expect.objectContaining({ content: narration }),
   );
+  expect(JSON.stringify(input(model.mock.calls.at(-1)![0]))).not.toContain(narration);
   expect(instance!.store.snapshot().messages).toContainEqual(
     expect.objectContaining({ content: narration }),
   );
@@ -287,6 +303,11 @@ it('starts work without exposing execution provider choices and accepts only rev
   await expect.poll(() => jobs().length).toBe(2);
   expect(jobs().map((j) => j.bot.provider)).toEqual(['codex', 'codex']);
   expect(jobs().every((j) => j.session === null)).toBe(true);
+  expect(jobs().every((j) => j.permissionMode === 'auto')).toBe(true);
+  expect(jobs().map((j) => j.executionDirectory)).toEqual([
+    '/tmp/openbot-project-a',
+    '/tmp/openbot-project-b',
+  ]);
   await message(g, '聊一下');
   await idle();
   expect(
@@ -489,7 +510,7 @@ it('recovers an interrupted model turn without duplicating already committed too
   });
 });
 
-it('persists sourced memory and confines group facts to their originating group', async () => {
+it('retains the origin of group memories while allowing the same Bot to recall them across its conversations', async () => {
   let remember = true;
   const contexts: ReturnType<typeof input>[] = [];
   await setup(async (messages) => {
@@ -516,8 +537,8 @@ it('persists sourced memory and confines group facts to their originating group'
   );
   await message(await group([b], 'other'), '这里有什么约束？');
   await idle();
-  expect(contexts.at(-1)?.memory).not.toContainEqual(
-    expect.objectContaining({ key: 'constraint' }),
+  expect(contexts.at(-1)?.memory).toContainEqual(
+    expect.objectContaining({ key: 'constraint', groupId: g, scope: 'group', sourceMessageId: id }),
   );
 });
 
@@ -765,4 +786,436 @@ it('uses official function calling with bounded output, no hidden provider crede
     request.tools.some((t: { function: { name: string } }) => t.function.name === 'start_worker'),
   ).toBe(true);
   expect(request.messages[0].content).not.toContain('test-only-secret');
+});
+
+it('uses one Bot identity to retrieve another conversation, extract sourced memory and contact a shared colleague', async () => {
+  let bob = '',
+    star = '',
+    shared = '',
+    privateChat = '',
+    factId = '';
+  let stage = 0;
+  const results: any[] = [];
+  const contexts: any[] = [];
+  await setup(async (messages) => {
+    const data = input(messages);
+    contexts.push(data);
+    if (data.bot.id !== bob || data.group.id !== privateChat) return reply();
+    if (messages.at(-1)?.role === 'tool') results.push(JSON.parse(messages.at(-1)!.content!));
+    switch (stage++) {
+      case 0:
+        return call('list_conversations', {});
+      case 1:
+        return call('search_messages', { query: 'Winston' });
+      case 2:
+        return call('read_message', { messageId: factId });
+      case 3:
+        return call('remember', {
+          key: 'human-name',
+          content: '用户叫 Winston',
+          provenance: 'user',
+          sourceMessageId: factId,
+        });
+      case 4:
+        return call('recall_memory', { query: 'Winston' });
+      case 5:
+        return call('read_conversation', { groupId: shared, limit: 2 });
+      case 6:
+        return call('send_message', {
+          groupId: shared,
+          content: '用户让我告诉你，他叫 Winston。',
+          mentionBotIds: [star],
+        });
+      default:
+        return reply('已在学习英语的app群里告诉 Star。');
+    }
+  });
+  bob = await bot();
+  star = await bot('Star');
+  shared = await group([bob, star], '学习英语的app');
+  const history = await group([bob], '之前的聊天');
+  factId = await message(history, '我叫 Winston。这个聊天里还讨论了无关的私人安排。');
+  await idle();
+  await api('POST', `/api/bots/${star}/chat`);
+  privateChat = (await api('POST', `/api/bots/${bob}/chat`)).json().id;
+  await message(privateChat, '去群里艾特 Star，告诉他我叫什么');
+  await idle();
+  expect(results[0].map((g: any) => g.groupId)).toEqual(
+    expect.arrayContaining([shared, history, privateChat]),
+  );
+  expect(results[0]).not.toContainEqual(expect.objectContaining({ name: 'Star', direct: true }));
+  expect(results[0].find((g: any) => g.groupId === shared).participants).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: 'user_local', type: 'human' }),
+      expect.objectContaining({ id: bob, name: 'Bob', type: 'bot' }),
+      expect.objectContaining({ id: star, name: 'Star', type: 'bot' }),
+    ]),
+  );
+  expect(results[1].messages).toContainEqual(
+    expect.objectContaining({ id: factId, groupId: history }),
+  );
+  expect(results[2]).toMatchObject({ id: factId, actor: { type: 'human' } });
+  expect(results[3]).toMatchObject({ saved: true });
+  expect(results[4]).toContainEqual(
+    expect.objectContaining({
+      sourceMessageId: factId,
+      provenance: 'user',
+      content: '用户叫 Winston',
+    }),
+  );
+  expect(results[6]).toMatchObject({ sent: true, groupId: shared, mentions: [star] });
+  const posted = instance!.store.snapshot().messages.find((m) => m.id === results[6].messageId)!;
+  expect(posted).toMatchObject({
+    senderId: bob,
+    senderType: 'bot',
+    groupId: shared,
+    mentions: [star],
+    replyTo: null,
+  });
+  expect(posted.content).toBe('@Star 用户让我告诉你，他叫 Winston。');
+  expect(posted.content).not.toContain('私人安排');
+  expect(contexts).toContainEqual(
+    expect.objectContaining({
+      bot: expect.objectContaining({ id: star }),
+      group: expect.objectContaining({ id: shared }),
+      event: expect.objectContaining({ message: expect.objectContaining({ id: posted.id }) }),
+    }),
+  );
+  expect(jobs()).toHaveLength(0);
+});
+
+it('searches and paginates full joined history, including messages the Bot never responded to', async () => {
+  let target = '',
+    current = '',
+    old = '';
+  let stage = 0;
+  const results: any[] = [];
+  await setup(async (messages) => {
+    if (input(messages).group.id !== current) return reply();
+    if (messages.at(-1)?.role === 'tool') results.push(JSON.parse(messages.at(-1)!.content!));
+    switch (stage++) {
+      case 0:
+        return call('search_messages', { query: '早期约定', groupId: target, limit: 1 });
+      case 1:
+        return call('read_conversation', { groupId: target, limit: 20 });
+      case 2:
+        return call('read_conversation', {
+          groupId: target,
+          limit: 20,
+          beforeMessageId: results[1].nextBeforeMessageId,
+        });
+      case 3:
+        return call('read_message', { messageId: old, offset: 12000 });
+      default:
+        return reply();
+    }
+  });
+  const b = await bot();
+  target = await group([b], '历史记录');
+  for (let i = 0; i < 26; i++) {
+    const id = randomUUID();
+    if (!i) old = id;
+    instance!.store.insertMessage({
+      id,
+      groupId: target,
+      senderId: 'user_local',
+      senderType: 'human',
+      content: i ? `后续记录 ${i}` : `早期约定 ${'x'.repeat(13000)} END`,
+      mentions: [],
+      replyTo: null,
+      timestamp: new Date().toISOString(),
+      messageType: 'text',
+      correlationId: null,
+    });
+  }
+  current = (await api('POST', `/api/bots/${b}/chat`)).json().id;
+  await message(current, '查一下早期约定');
+  await idle();
+  expect(results[0].messages[0]).toMatchObject({ id: old, groupId: target, length: 13009 });
+  expect(results[1].messages).toHaveLength(20);
+  expect(results[2].messages).toHaveLength(6);
+  expect(results[2].messages[0].id).toBe(old);
+  expect(results[2].nextBeforeMessageId).toBeNull();
+  expect(results[3].content).toContain('END');
+  expect(
+    instance!.store.db
+      .prepare('SELECT count(*) AS n FROM dialogue_inbox WHERE group_id=?')
+      .get(target),
+  ).toEqual({ n: 0 });
+});
+
+it('checks membership for history, memory sources, destinations and mentioned colleagues', async () => {
+  let current = '',
+    foreign = '',
+    foreignMessage = '',
+    outsider = '';
+  let stage = 0;
+  const results: any[] = [];
+  await setup(async (messages) => {
+    if (input(messages).group.id !== current) return reply();
+    if (messages.at(-1)?.role === 'tool') results.push(JSON.parse(messages.at(-1)!.content!));
+    switch (stage++) {
+      case 0:
+        return call('read_conversation', { groupId: foreign });
+      case 1:
+        return call('read_message', { messageId: foreignMessage });
+      case 2:
+        return call('search_messages', { query: '秘密', groupId: foreign });
+      case 3:
+        return call('search_messages', { query: '秘密' });
+      case 4:
+        return call('remember', {
+          key: 'foreign',
+          content: '秘密',
+          sourceMessageId: foreignMessage,
+        });
+      case 5:
+        return call('send_message', { groupId: foreign, content: '越界发送' });
+      case 6:
+        return call('send_message', {
+          groupId: current,
+          content: '找你',
+          mentionBotIds: [outsider],
+        });
+      case 7:
+        return call('send_message', { groupId: current, content: '@Star 找你' });
+      default:
+        return reply();
+    }
+  });
+  const bob = await bot();
+  outsider = await bot('Star');
+  foreign = (await api('POST', `/api/bots/${outsider}/chat`)).json().id;
+  foreignMessage = await message(foreign, 'Star 的私聊秘密');
+  await idle();
+  current = await group([bob]);
+  await message(current, '检查边界');
+  await idle();
+  for (const i of [0, 1, 2, 4, 5]) expect(results[i].error).toContain('自己所在的对话');
+  expect(results[3].messages).toEqual([]);
+  for (const i of [6, 7]) expect(results[i].error).toContain('目标对话');
+  expect(instance!.store.snapshot().messages.filter((m) => m.senderType === 'bot')).toEqual([]);
+  expect(instance!.store.db.prepare('SELECT count(*) AS n FROM bot_memory').get()).toEqual({
+    n: 0,
+  });
+});
+
+it('can learn from another joined group without treating a colleague claim as a human fact', async () => {
+  let current = '',
+    claim = '';
+  await setup(async (messages) => {
+    if (input(messages).group.id !== current || messages.at(-1)?.role === 'tool') return reply();
+    return call('remember', {
+      key: 'identity',
+      content: '用户叫 Alice',
+      sourceMessageId: claim,
+      provenance: 'user',
+    });
+  });
+  const b = await bot(),
+    other = await bot('Alice');
+  const shared = await group([b, other]);
+  claim = randomUUID();
+  instance!.store.insertMessage({
+    id: claim,
+    groupId: shared,
+    senderId: other,
+    senderType: 'bot',
+    content: '用户叫 Alice',
+    mentions: [],
+    replyTo: null,
+    timestamp: new Date().toISOString(),
+    messageType: 'text',
+    correlationId: null,
+  });
+  current = (await api('POST', `/api/bots/${b}/chat`)).json().id;
+  await message(current, '记住刚才的事');
+  await idle();
+  expect(
+    instance!.store.db.prepare("SELECT result FROM coordinator_calls WHERE name='remember'").get(),
+  ).toEqual({ result: expect.stringContaining('不能把同事') });
+});
+
+it('posts once across duplicate model tool requests and a coordinator restart', async () => {
+  let current = '',
+    destination = '',
+    recipient = '';
+  let sent = 0,
+    waiting = false;
+  const path = await setup(async (messages, signal) => {
+    if (input(messages).group.id !== current) return reply();
+    if (sent++ < 2)
+      return call('send_message', {
+        groupId: destination,
+        content: '我来同步约定。',
+        mentionBotIds: [recipient],
+      });
+    waiting = true;
+    return new Promise((_, reject) =>
+      signal.addEventListener('abort', () => reject(new Error('closed')), { once: true }),
+    );
+  });
+  const b = await bot();
+  recipient = await bot('Star');
+  destination = await group([b, recipient]);
+  current = (await api('POST', `/api/bots/${b}/chat`)).json().id;
+  await message(current, '去跟 Star 同步约定');
+  await expect.poll(() => waiting).toBe(true);
+  const messages = () =>
+    instance!.store
+      .snapshot()
+      .messages.filter((m) => m.groupId === destination && m.senderId === b);
+  expect(messages()).toHaveLength(1);
+  await instance!.app.close();
+  instance = undefined;
+  await setup(async () => reply(), path);
+  await idle();
+  expect(messages()).toHaveLength(1);
+  expect(
+    instance!.store.db
+      .prepare("SELECT count(*) AS n FROM coordinator_calls WHERE name='send_message'")
+      .get(),
+  ).toEqual({ n: 2 });
+});
+
+it('automatically compacts a growing real tool turn and retrieves archived evidence without replaying tools', async () => {
+  let oldMessage = '',
+    round = 0;
+  const seen: CoordinatorMessage[][] = [];
+  const summarize = vi.fn(async () => '已按页读取原始要求，尚未验证执行结果；引用时需回查原文。');
+  const model: CoordinatorModel = Object.assign(
+    async (messages: CoordinatorMessage[]) => {
+      seen.push(structuredClone(messages));
+      if (round < 3)
+        return call('read_message', { messageId: oldMessage, offset: round++ * 12000 });
+      if (round++ === 3) {
+        const compacted = messages.find(
+          (m, i) => i >= 2 && m.role === 'user' && m.content?.includes('contextCompaction'),
+        )!;
+        const archive = JSON.parse(compacted.content!).contextCompaction.archive;
+        return call('read_context', { turnId: archive.turnId, callId: archive.callIds[0] });
+      }
+      return reply('已读取记录，接下来按原始要求处理。');
+    },
+    { summarize },
+  );
+  await setup(model);
+  const b = await bot(),
+    g = await group([b]);
+  oldMessage = randomUUID();
+  instance!.store.insertMessage({
+    id: oldMessage,
+    groupId: g,
+    senderId: 'user_local',
+    senderType: 'human',
+    content: '完整的原始需求和证据。'.repeat(9000),
+    mentions: [],
+    replyTo: null,
+    timestamp: new Date().toISOString(),
+    messageType: 'text',
+    correlationId: null,
+  });
+  const source = await message(g, '先分三页读原文，再回查已归档的证据。');
+  await idle();
+  expect(summarize).toHaveBeenCalled();
+  expect(seen).toHaveLength(5);
+  expect(seen.every((messages) => input(messages).event.message.id === source)).toBe(true);
+  expect(instance!.store.snapshot().dialogueFailures).toEqual([]);
+  expect(
+    instance!.store.db
+      .prepare("SELECT count(*) AS n FROM coordinator_calls WHERE name='read_message'")
+      .get(),
+  ).toEqual({ n: 3 });
+  expect(
+    instance!.store.db
+      .prepare("SELECT count(*) AS n FROM coordinator_calls WHERE name='read_context'")
+      .get(),
+  ).toEqual({ n: 1 });
+  const archivedRead = instance!.store.db
+    .prepare("SELECT result FROM coordinator_calls WHERE name='read_context'")
+    .get() as { result: string };
+  expect(JSON.parse(archivedRead.result).content).toContain('完整的原始需求和证据');
+  expect(
+    instance!.store.db.prepare('SELECT count(*) AS n FROM bot_context_compactions').get(),
+  ).toEqual({ n: expect.any(Number) });
+});
+
+it('keeps ongoing work alive when staying silent and cannot skip a required result acceptance', async () => {
+  let rejectedSilence = false;
+  await setup(async (messages) => {
+    const data = input(messages);
+    const result =
+      messages.at(-1)?.role === 'tool' ? JSON.parse(messages.at(-1)!.content!) : undefined;
+    if (data.event.kind === 'completion') {
+      if (result?.error?.includes('待验收')) {
+        rejectedSilence = true;
+        return call('finish_task', { taskId: data.event.taskId, verification: '已核对真实结果。' });
+      }
+      return call('stay_silent', {});
+    }
+    return result
+      ? call('stay_silent', {})
+      : call('start_worker', { goal: '核实原始结果', resourceMode: 'read' });
+  });
+  const b = await bot();
+  await message(await group([b]), '核实原始结果');
+  await idle();
+  expect(jobs()).toHaveLength(1);
+  expect(instance!.store.snapshot().tasks[0].status).toBe('running');
+  expect(instance!.store.snapshot().messages.filter((m) => m.senderType === 'bot')).toEqual([]);
+  event(jobs()[0], {
+    type: 'result',
+    status: 'completed',
+    text: '已读取并实测，原始结果符合要求。',
+  });
+  await idle();
+  expect(rejectedSilence).toBe(true);
+  expect(instance!.store.snapshot().tasks[0].status).toBe('completed');
+  expect(instance!.store.snapshot().messages.filter((m) => m.senderType === 'bot')).toEqual([]);
+  expect(instance!.store.snapshot().dialogueFailures).toEqual([]);
+});
+
+it('rejects publishing internal silence reasoning through an explicit message tool as well', async () => {
+  let g = '';
+  let rejection = '';
+  await setup(async (messages) => {
+    const result =
+      messages.at(-1)?.role === 'tool' ? JSON.parse(messages.at(-1)!.content!) : undefined;
+    if (result) {
+      rejection = result.error;
+      return call('stay_silent', {});
+    }
+    return call('send_message', {
+      groupId: g,
+      content:
+        '无需回复——这是 Bob 在催促用户做选择，并没有新的信息需要我处理；卡片已经在群里，等用户选定。',
+    });
+  });
+  g = await group([await bot()]);
+  await message(g, '看看当前讨论');
+  await idle();
+  expect(rejection).toContain('stay_silent');
+  expect(instance!.store.snapshot().messages.filter((m) => m.senderType === 'bot')).toEqual([]);
+});
+
+it('captures owner permission mode per dispatch and leaves an already running assignment unchanged', async () => {
+  await setup(async (messages) =>
+    messages.at(-1)?.role === 'tool'
+      ? reply()
+      : call('start_worker', {
+          goal: input(messages).event.message.content,
+          resourceMode: 'read',
+          resourceKey: '/tmp',
+        }),
+  );
+  const g = await group([await bot()]);
+  await message(g, '第一项检查');
+  await idle();
+  expect(jobs()).toHaveLength(1);
+  expect(jobs()[0].permissionMode).toBe('auto');
+  expect((await api('POST', '/api/settings/execution', { mode: 'manual' })).statusCode).toBe(200);
+  await message(g, '第二项检查');
+  await idle();
+  expect(jobs()).toHaveLength(2);
+  expect(jobs().map((job) => job.permissionMode)).toEqual(['auto', 'manual']);
 });

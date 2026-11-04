@@ -15,6 +15,18 @@ const git = (root: string, args: string[]) =>
 /** A device-wide writer lease is real scheduling exclusion, not a claimed path boundary. */
 export class TaskResources {
   constructor(private store: Store) {}
+  directory(taskId: string): string | undefined {
+    const workspace = this.store.db
+      .prepare(
+        'SELECT p.path FROM pipeline_workspaces p JOIN task_pipeline_bindings b ON b.pipeline_id=p.pipeline_id WHERE b.task_id=?',
+      )
+      .get(taskId) as { path: string } | undefined;
+    if (workspace) return workspace.path;
+    const worker = this.store.db
+      .prepare('SELECT resource_key FROM task_workers WHERE task_id=?')
+      .get(taskId) as { resource_key: string } | undefined;
+    return worker?.resource_key && worker.resource_key !== '*' ? worker.resource_key : undefined;
+  }
   mode(taskId: string): ResourceMode {
     return (
       (

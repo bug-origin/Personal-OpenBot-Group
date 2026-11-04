@@ -47,8 +47,8 @@ await app.listen({ host, port: Number(process.env.PORT ?? 4310) });
 console.log(`OpenBot local service ready. Token file: ${tokenPath}`);
 console.log(
   brain.enabled
-    ? `数字员工对话模型已配置：${brain.provider} / ${brain.model}（独立协调已启用）`
-    : '数字员工对话模型未启用：未填写 DEEPSEEK_API_KEY 或 BRAIN_ENABLED=false',
+    ? `Bot 对话模型已配置：${brain.provider} / ${brain.model}（独立协调已启用）`
+    : 'Bot 对话模型未启用：未填写 DEEPSEEK_API_KEY 或 BRAIN_ENABLED=false',
 );
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.on(signal, () => {

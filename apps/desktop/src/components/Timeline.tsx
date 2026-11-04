@@ -22,6 +22,7 @@ import { statusLabel } from '@openbot/shared';
 import { NativeInteraction } from './NativeInteraction';
 import type { ActionEnvelope } from '@openbot/shared/ui/types';
 import { BotAvatar, IconButton } from './Primitives';
+import { rehypeMentions, splitMentions } from '../lib/mentions';
 const DynamicMessage = lazy(() => import('./DynamicMessage'));
 export function Welcome({
   group,
@@ -75,14 +76,14 @@ export function Welcome({
 
       <h1>开始群聊</h1>
       <p className="welcome-copy">
-        {hasBots ? '发送消息开始讨论，输入 @ 可指定数字员工。' : '先添加数字员工，再开始讨论。'}
+        {hasBots ? '发送消息开始讨论，输入 @ 可指定 Bot。' : '先添加 Bot，再开始讨论。'}
       </p>
       <div className="start-cards">
         <button onClick={onBot}>
           <span className="step-icon peach">
             <BotIcon size={20} />
           </span>
-          <strong>创建数字员工</strong>
+          <strong>创建 Bot</strong>
 
           <span className="step-arrow">↗</span>
         </button>
@@ -106,11 +107,23 @@ export function Welcome({
     </motion.div>
   );
 }
-function MessageBody({ message }: { message: Message }) {
+function MentionText({ content, bots }: { content: string; bots: Bot[] }) {
+  return splitMentions(content, bots).map((part, index) =>
+    part.botId ? (
+      <span className="chat-mention" data-bot-id={part.botId} key={index}>
+        {part.text}
+      </span>
+    ) : (
+      part.text
+    ),
+  );
+}
+function MessageBody({ message, bots }: { message: Message; bots: Bot[] }) {
   return (
     <div className="markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[[rehypeMentions, bots]]}
         components={{
           a: ({ children, href }) => {
             const safe = href && /^https?:\/\//i.test(href);
@@ -189,7 +202,7 @@ function MessageItem({
       <div className="message-content">
         <div className="message-meta">
           <strong>{bot?.name ?? data.user.name}</strong>
-          {bot && <span className="bot-tag">数字员工</span>}
+          {bot && <span className="bot-tag">Bot</span>}
           <time
             dateTime={message.timestamp}
             title={new Date(message.timestamp).toLocaleString('zh-CN')}
@@ -240,7 +253,7 @@ function MessageItem({
             </div>
           )}
         <div id={`message-${message.id}`} className="message-body">
-          {card ?? <MessageBody message={message} />}
+          {card ?? <MessageBody message={message} bots={data.bots} />}
         </div>
       </div>
       <IconButton label="回复消息" onPress={() => onReply(message)} className="message-action">
@@ -289,6 +302,7 @@ export function Timeline({
   const [mentionDismissed, setMentionDismissed] = useState(false);
   const list = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const highlights = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const lastId = useRef('');
   const pendingId = useRef<string | null>(null);
@@ -304,6 +318,7 @@ export function Timeline({
     if (textarea.current) {
       textarea.current.style.height = 'auto';
       textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 160)}px`;
+      if (highlights.current) highlights.current.scrollTop = textarea.current.scrollTop;
     }
   }, [content, group.id, draftScope]);
   useEffect(() => {
@@ -470,7 +485,7 @@ export function Timeline({
                 className="mention-menu"
               >
                 <div className="mention-heading">
-                  提及数字员工 <kbd>Esc 关闭</kbd>
+                  提及 Bot <kbd>Esc 关闭</kbd>
                 </div>
                 {suggestions.length ? (
                   suggestions.map((bot) => (
@@ -483,62 +498,74 @@ export function Timeline({
                   ))
                 ) : (
                   <div className="mention-empty">
-                    {bots.length ? '没有匹配的数字员工' : '请先添加群组成员'}
+                    {bots.length ? '没有匹配的 Bot' : '请先添加群组成员'}
                   </div>
                 )}
               </motion.div>
             )}
           </AnimatePresence>
-          <textarea
-            ref={textarea}
-            aria-label="消息内容"
-            value={content}
-            maxLength={16000}
-            onCompositionStart={() => {
-              composing.current = true;
-            }}
-            onCompositionEnd={() => {
-              composing.current = false;
-            }}
-            onBlur={() => {
-              composing.current = false;
-            }}
-            onChange={(e) => {
-              setContent(e.target.value);
-              setMentionDismissed(false);
-              pendingId.current = null;
-              setSendError('');
-            }}
-            placeholder={
-              connected
-                ? group.directBotId
-                  ? `发送消息给 ${group.name}…`
-                  : `发送消息，输入 @ 指定数字员工…`
-                : '连接恢复后可发送消息'
-            }
-            onKeyDown={(e) => {
-              // Some native input methods clear isComposing before the confirmation Enter.
-              // keyCode 229 also covers that confirmation without consuming the next normal Enter.
-              if (composing.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229)
-                return;
-              if (e.key === 'Escape') {
-                setMentionOpen(false);
-                setMentionDismissed(true);
+          <div className="composer-input">
+            <div className="composer-highlights" ref={highlights} aria-hidden="true">
+              <MentionText content={content} bots={bots} />
+              {'\u200b'}
+            </div>
+            <textarea
+              ref={textarea}
+              aria-label="消息内容"
+              value={content}
+              maxLength={16000}
+              onScroll={(e) => {
+                if (highlights.current) {
+                  highlights.current.scrollTop = e.currentTarget.scrollTop;
+                  highlights.current.scrollLeft = e.currentTarget.scrollLeft;
+                }
+              }}
+              onCompositionStart={() => {
+                composing.current = true;
+              }}
+              onCompositionEnd={() => {
+                composing.current = false;
+              }}
+              onBlur={() => {
+                composing.current = false;
+              }}
+              onChange={(e) => {
+                setContent(e.target.value);
+                setMentionDismissed(false);
+                pendingId.current = null;
+                setSendError('');
+              }}
+              placeholder={
+                connected
+                  ? group.directBotId
+                    ? `发送消息给 ${group.name}…`
+                    : `发送消息，输入 @ 指定 Bot…`
+                  : '连接恢复后可发送消息'
               }
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (showMentions && suggestions.length) {
-                  mention(suggestions[0]);
-                } else void send();
-              }
-            }}
-            rows={2}
-          />
+              onKeyDown={(e) => {
+                // Some native input methods clear isComposing before the confirmation Enter.
+                // keyCode 229 also covers that confirmation without consuming the next normal Enter.
+                if (composing.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229)
+                  return;
+                if (e.key === 'Escape') {
+                  setMentionOpen(false);
+                  setMentionDismissed(true);
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (showMentions && suggestions.length) {
+                    mention(suggestions[0]);
+                  } else void send();
+                }
+              }}
+              rows={2}
+            />
+          </div>
           <div className="composer-tools">
             <div>
               {!group.directBotId && (
                 <IconButton
-                  label="提及数字员工"
+                  label="提及 Bot"
                   onPress={() => {
                     setMentionDismissed(false);
                     setMentionOpen((v) => !v);

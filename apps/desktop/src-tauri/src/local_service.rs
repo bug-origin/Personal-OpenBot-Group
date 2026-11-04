@@ -65,7 +65,7 @@ impl LocalService {
         }
         let mut child = command
             .spawn()
-            .map_err(|_| "无法启动内置服务，请重新安装 OpenBot")?;
+            .map_err(|_| "无法启动内置服务，请重新安装 Personal OpenBot Group")?;
         let output = child.stdout.take().ok_or("无法读取本地服务状态")?;
         let (send, receive) = mpsc::channel();
         thread::spawn(move || {
@@ -89,7 +89,7 @@ impl LocalService {
             }
             _ => {
                 stop(&mut child);
-                Err("本地服务启动失败，请点击重试或重新打开 OpenBot".into())
+                Err("本地服务启动失败，请点击重试或重新打开 Personal OpenBot Group".into())
             }
         }
     }

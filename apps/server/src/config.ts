@@ -42,6 +42,6 @@ export function readWorkerLimits(env: NodeJS.ProcessEnv = process.env) {
     perBridge < 1 ||
     perBridge > 16
   )
-    throw new Error('执行并发配置无效：每位数字员工 1–8 个，每台设备 1–16 个');
+    throw new Error('执行并发配置无效：每位 Bot 1–8 个，每台设备 1–16 个');
   return { perBot, perBridge };
 }

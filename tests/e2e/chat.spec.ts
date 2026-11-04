@@ -10,11 +10,11 @@ test('create a bot and group, synchronize real messages, reply, search and prese
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
   await expect(page.locator('.statusbar > button')).toContainText('协作服务已连接');
-  await page.getByRole('button', { name: '创建数字员工', exact: true }).first().click();
+  await page.getByRole('button', { name: '创建 Bot', exact: true }).first().click();
   const botDialog = page.getByRole('dialog');
-  await botDialog.getByLabel('数字员工名称').fill(botName);
+  await botDialog.getByLabel('Bot 名称').fill(botName);
   await botDialog.getByLabel('职责描述').fill('真实持久身份，等待本地 Bridge 接入');
-  await botDialog.getByRole('button', { name: '创建数字员工', exact: true }).click();
+  await botDialog.getByRole('button', { name: '创建 Bot', exact: true }).click();
   await expect(botDialog).not.toBeVisible();
   await page.getByRole('button', { name: '创建群组', exact: true }).first().click();
   const groupDialog = page.getByRole('dialog');
@@ -56,7 +56,7 @@ test('create a bot and group, synchronize real messages, reply, search and prese
   await page.keyboard.press('ControlOrMeta+k');
   await page
     .getByRole('dialog')
-    .getByRole('textbox', { name: '搜索群组、数字员工和消息' })
+    .getByRole('textbox', { name: '搜索群组、Bot 和消息' })
     .fill('真实保存');
   await expect(
     page
@@ -72,7 +72,7 @@ test('responsive chat connects automatically without connection settings', async
   await page.goto('/');
   await expect(page.locator('.statusbar > button')).toContainText('协作服务已连接');
   await page.getByRole('button', { name: '打开侧栏' }).click();
-  await expect(page.getByRole('button', { name: '管理数字员工', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '管理 Bot', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '创建群组', exact: true }).first().click();
   await page.getByRole('dialog').getByLabel('群组名称').fill(`手机测试_${Date.now()}`);
   await page.getByRole('dialog').getByRole('button', { name: '创建群组', exact: true }).click();

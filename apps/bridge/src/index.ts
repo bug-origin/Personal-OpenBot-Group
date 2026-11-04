@@ -80,6 +80,8 @@ async function execute(job: AgentJob) {
   const Adapter = job.bot.provider === 'claude-code' ? ClaudeExecution : CodexExecution;
   const execution: AgentExecution = new Adapter(executables[job.bot.provider], job, callbacks, {
     timeoutMs: taskTimeoutMs,
+    autoModeSupported:
+      providers.find((provider) => provider.provider === job.bot.provider)?.autoMode === true,
   });
   const heartbeat = setInterval(() => send({ type: 'heartbeat', ...base }), 15000);
   heartbeat.unref();

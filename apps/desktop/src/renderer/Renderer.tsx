@@ -82,7 +82,7 @@ export function Renderer(props: RendererProps) {
     </RenderBoundary>
   ) : (
     <div role="alert" className="callout danger">
-      无法显示卡片，请让数字员工重新发送。
+      无法显示卡片，请让 Bot 重新发送。
     </div>
   );
 }
@@ -1346,7 +1346,7 @@ class RenderBoundary extends Component<{ children: ReactNode }, { error: string 
   render() {
     return this.state.error ? (
       <div role="alert" className="callout danger">
-        无法显示卡片，请让数字员工重新发送。
+        无法显示卡片，请让 Bot 重新发送。
       </div>
     ) : (
       this.props.children

@@ -54,9 +54,9 @@ test('native questions and permissions round-trip inside the group without spawn
       { url, token },
     );
     await page.goto('/');
-    await page.getByRole('button', { name: '创建数字员工', exact: true }).first().click();
+    await page.getByRole('button', { name: '创建 Bot', exact: true }).first().click();
     const creation = page.getByRole('dialog');
-    await creation.getByLabel('数字员工名称').fill('NativeBob');
+    await creation.getByLabel('Bot 名称').fill('NativeBob');
     await expect(creation.getByText(/创建后自动连接/)).toBeVisible();
     await expect(creation.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
     await page.screenshot({
@@ -64,13 +64,13 @@ test('native questions and permissions round-trip inside the group without spawn
       fullPage: true,
       animations: 'disabled',
     });
-    await creation.getByRole('button', { name: '创建数字员工', exact: true }).click();
+    await creation.getByRole('button', { name: '创建 Bot', exact: true }).click();
     await expect(creation).not.toBeVisible();
     const created = instance.store.snapshot().bots.find((bot) => bot.name === 'NativeBob')!;
     expect(created).toMatchObject({ bridgeId, status: 'idle' });
     const bot = created.id;
     const group = (await api('/api/groups', { name: '原生交互验证', botIds: [bot] })).id;
-    await page.getByRole('button', { name: '管理数字员工', exact: true }).first().click();
+    await page.getByRole('button', { name: '管理 Bot', exact: true }).first().click();
     const profile = page.locator('.bot-profile').filter({
       has: page.getByRole('heading', { name: 'NativeBob', exact: true }),
     });

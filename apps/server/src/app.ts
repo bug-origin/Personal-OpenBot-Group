@@ -9,6 +9,7 @@ import { createCoordinatorModel, type CoordinatorModel } from './coordinator-mod
 import { createAttentionModel, type AttentionModel } from './attention-model.js';
 import { readBrainConfig, type BrainConfig } from './config.js';
 import { ModelSettings, modelConnectionSchema, modelSettingsSchema } from './model-settings.js';
+import { ExecutionSettings, executionSettingsSchema } from './execution-settings.js';
 import { listProviderModels } from './model-providers.js';
 import type { ActionEnvelope } from '@openbot/shared/ui/types';
 import { z } from 'zod';
@@ -40,13 +41,14 @@ export async function createApp(options: {
 }) {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 100_000 });
   const store = createStore(options.databasePath);
+  const executionSettings = new ExecutionSettings(options.databasePath);
   const settings = new ModelSettings(
     options.databasePath,
     options.modelConfig ?? readBrainConfig({ BRAIN_ENABLED: 'false' }),
   );
   const configuredCoordinator: CoordinatorModel = async (messages, signal) => {
     const model = createCoordinatorModel(settings.current());
-    if (!model) throw new Error('请先在设置中配置数字员工的对话模型');
+    if (!model) throw new Error('请先在设置中配置 Bot 的对话模型');
     return model(messages, signal);
   };
   const coordinator =
@@ -106,6 +108,7 @@ export async function createApp(options: {
     options.workerLimits,
     attention,
   );
+  runtime.executionPermissionMode = executionSettings.mode;
   runtime.start();
   const fail = (statusCode: number, message: string) =>
     Object.assign(new Error(message), { statusCode });
@@ -139,6 +142,29 @@ export async function createApp(options: {
     maxRounds: runtime.maxRounds,
   }));
   app.get('/api/settings/model', async () => settings.view());
+  const executionView = () => ({
+    mode: executionSettings.mode,
+    providers: runtime.bridges.flatMap((bridge) =>
+      bridge.providers.map((provider) => ({
+        bridgeId: bridge.id,
+        bridgeName: bridge.name,
+        provider: provider.provider,
+        autoMode: provider.autoMode === true,
+        reason: provider.available
+          ? (provider.autoModeReason ??
+            (provider.autoMode ? undefined : '当前执行工具未报告自动模式支持，将逐次确认'))
+          : provider.reason,
+      })),
+    ),
+  });
+  app.get('/api/settings/execution', async () => executionView());
+  app.post('/api/settings/execution', async (req) => {
+    const { mode } = executionSettingsSchema.parse(req.body);
+    executionSettings.save(mode);
+    runtime.executionPermissionMode = mode;
+    broadcast();
+    return executionView();
+  });
   app.post('/api/settings/models', async (req) => ({
     models: await listProviderModels(settings.resolve(modelConnectionSchema.parse(req.body))),
   }));
@@ -272,8 +298,7 @@ export async function createApp(options: {
   app.post('/api/groups', async (req, reply) => {
     const body = groupSchema.parse(req.body),
       s = store.snapshot();
-    if (body.botIds.some((id) => !s.bots.some((b) => b.id === id)))
-      throw fail(400, '数字员工不存在');
+    if (body.botIds.some((id) => !s.bots.some((b) => b.id === id))) throw fail(400, 'Bot 不存在');
     const id = store.id();
     store.db.transaction(() => {
       store.db
@@ -291,7 +316,7 @@ export async function createApp(options: {
       s = store.snapshot();
     if (!s.groups.some((g) => g.id === id)) throw fail(404, '群组不存在');
     if (s.groups.find((g) => g.id === id)?.directBotId) throw fail(409, '单独聊天不能修改成员');
-    if (body.botIds.some((b) => !s.bots.some((x) => x.id === b))) throw fail(400, '数字员工不存在');
+    if (body.botIds.some((b) => !s.bots.some((x) => x.id === b))) throw fail(400, 'Bot 不存在');
     store.db.transaction(() => {
       store.db
         .prepare('UPDATE groups SET name=?,description=? WHERE id=?')
@@ -312,7 +337,7 @@ export async function createApp(options: {
     const body = botSchema.extend({ bridgeId: z.string().min(1).optional() }).parse(req.body),
       s = store.snapshot();
     if (s.bots.some((b) => b.name.toLowerCase() === body.name.toLowerCase()))
-      throw fail(409, '数字员工名称已被使用');
+      throw fail(409, 'Bot 名称已被使用');
     const bridgeId = runtime.creationBridge(body.provider, body.bridgeId);
     const id = store.id();
     store.db.transaction(() => {
@@ -339,7 +364,7 @@ export async function createApp(options: {
   app.patch<{ Params: { id: string } }>('/api/bots/:id/avatar', async (req) => {
     const { avatar } = botAvatarUpdateSchema.parse(req.body);
     if (!store.db.prepare('SELECT id FROM bots WHERE id=?').get(req.params.id))
-      throw fail(404, '数字员工不存在');
+      throw fail(404, 'Bot 不存在');
     if (avatar)
       store.db
         .prepare(
@@ -353,9 +378,9 @@ export async function createApp(options: {
   app.delete('/api/bots/:id', async (req) => {
     const { id } = req.params as { id: string };
     const bot = store.snapshot().bots.find((b) => b.id === id);
-    if (!bot) throw fail(404, '数字员工不存在');
+    if (!bot) throw fail(404, 'Bot 不存在');
     // Keep the durable identity and message attribution; removal is intentionally unsupported in stage 1.
-    throw fail(409, '暂不支持删除数字员工，可将其移出群组。');
+    throw fail(409, '暂不支持删除 Bot，可将其移出群组。');
   });
   app.post<{ Params: { id: string } }>('/api/bots/:id/chat', async (req, reply) => {
     z.object({})
@@ -363,7 +388,7 @@ export async function createApp(options: {
       .parse(req.body ?? {});
     const s = store.snapshot();
     const bot = s.bots.find((b) => b.id === req.params.id);
-    if (!bot) throw fail(404, '数字员工不存在');
+    if (!bot) throw fail(404, 'Bot 不存在');
     const existing = s.groups.find((g) => g.directBotId === bot.id);
     if (existing) return { id: existing.id };
     const id = store.id();
@@ -397,7 +422,7 @@ export async function createApp(options: {
       throw fail(400, '回复消息不属于当前群组');
     const mentions = resolveMentions(body.content, s.bots);
     if (mentions.some((id) => !group.botIds.includes(id)))
-      throw fail(400, '提及的数字员工尚未加入群组');
+      throw fail(400, '提及的 Bot 尚未加入群组');
     if (body.mentions.some((id) => !mentions.includes(id))) throw fail(400, '提及与消息内容不一致');
     const message: Message = {
       id: body.id,
@@ -464,6 +489,8 @@ export async function createApp(options: {
             version: z.string().max(80),
             available: z.boolean(),
             reason: z.string().max(200).optional(),
+            autoMode: z.boolean().optional(),
+            autoModeReason: z.string().max(200).optional(),
           }),
         )
         .max(8),

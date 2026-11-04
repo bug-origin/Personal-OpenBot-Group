@@ -12,9 +12,9 @@ test('keeps IME confirmation Enter out of message sending and Bot selection', as
   const botName = `IME_${suffix}`;
   await page.goto('/');
   await expect(page.locator('.statusbar > button')).toContainText('协作服务已连接');
-  await page.getByRole('button', { name: '创建数字员工', exact: true }).first().click();
-  await page.getByRole('dialog').getByLabel('数字员工名称').fill(botName);
-  await page.getByRole('dialog').getByRole('button', { name: '创建数字员工', exact: true }).click();
+  await page.getByRole('button', { name: '创建 Bot', exact: true }).first().click();
+  await page.getByRole('dialog').getByLabel('Bot 名称').fill(botName);
+  await page.getByRole('dialog').getByRole('button', { name: '创建 Bot', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await page.getByRole('button', { name: '创建群组', exact: true }).first().click();
   await page.getByRole('dialog').getByLabel('群组名称').fill(`输入法验证_${suffix}`);

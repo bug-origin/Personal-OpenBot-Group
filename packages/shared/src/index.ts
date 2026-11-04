@@ -199,7 +199,25 @@ export function resolveMentions(content: string, bots: Pick<Bot, 'id' | 'name'>[
 export interface BridgeInfo {
   id: string;
   name: string;
-  providers: { provider: Provider; version: string; available: boolean; reason?: string }[];
+  providers: {
+    provider: Provider;
+    version: string;
+    available: boolean;
+    reason?: string;
+    autoMode?: boolean;
+    autoModeReason?: string;
+  }[];
+}
+export type ExecutionPermissionMode = 'auto' | 'manual';
+export interface ExecutionSettingsView {
+  mode: ExecutionPermissionMode;
+  providers: {
+    bridgeId: string;
+    bridgeName: string;
+    provider: Provider;
+    autoMode: boolean;
+    reason?: string;
+  }[];
 }
 export interface Approval {
   id: string;
@@ -210,6 +228,8 @@ export interface Approval {
   createdAt: string;
 }
 export interface AgentJob {
+  permissionMode?: ExecutionPermissionMode;
+  executionDirectory?: string;
   projectFacts?: { id: string; key: string; version: number; kind: string; content: string }[];
   artifactsToVerify?: WorkArtifact[];
   task: Task;

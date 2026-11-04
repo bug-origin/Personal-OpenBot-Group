@@ -7,6 +7,7 @@ import type {
   Bot,
   BridgeCommand,
   BridgeInfo,
+  ExecutionPermissionMode,
   Message,
   NativeRequestSpec,
   Provider,
@@ -32,6 +33,7 @@ import type { WorkArtifact } from '@openbot/shared';
 import { BotDelegations } from './bot-delegations.js';
 type Link = { info: BridgeInfo; send: (command: BridgeCommand) => void; close: () => void };
 export class Runtime {
+  executionPermissionMode: ExecutionPermissionMode = 'auto';
   private links = new Map<string, Link>();
   private closed = false;
   private controller = new AbortController();
@@ -295,12 +297,12 @@ export class Runtime {
   }
   bind(botId: string, bridgeId: string) {
     const bot = this.store.snapshot().bots.find((b) => b.id === botId);
-    if (!bot) throw Object.assign(new Error('数字员工不存在'), { statusCode: 404 });
+    if (!bot) throw Object.assign(new Error('Bot 不存在'), { statusCode: 404 });
     this.configureExecution(botId, bot.provider, bridgeId);
   }
   configureExecution(botId: string, provider: Provider, selectedBridge?: string) {
     const bot = this.store.snapshot().bots.find((b) => b.id === botId);
-    if (!bot) throw Object.assign(new Error('数字员工不存在'), { statusCode: 404 });
+    if (!bot) throw Object.assign(new Error('Bot 不存在'), { statusCode: 404 });
     if (
       this.store
         .snapshot()
@@ -863,6 +865,8 @@ export class Runtime {
         }
         const currentTask = this.store.snapshot().tasks.find((t) => t.id === task.id)!;
         const job: AgentJob = {
+          permissionMode: this.executionPermissionMode,
+          executionDirectory: this.resources.directory(task.id),
           task: currentTask,
           projectFacts,
           artifactsToVerify,
@@ -1292,7 +1296,7 @@ export class Runtime {
     if (task.status !== 'failed' || latest?.status !== 'unknown')
       throw Object.assign(new Error('只有执行结果未知的中断任务可以恢复'), { statusCode: 409 });
     if (!state.groups.some((g) => g.id === task.groupId && g.botIds.includes(task.botId)))
-      throw Object.assign(new Error('数字员工已离开这项工作所属的群组'), { statusCode: 409 });
+      throw Object.assign(new Error('Bot 已离开这项工作所属的群组'), { statusCode: 409 });
     const origin = this.store.db
       .prepare('SELECT source_message_id FROM task_runtime WHERE task_id=?')
       .get(id) as { source_message_id: string };
