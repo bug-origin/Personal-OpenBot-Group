@@ -44,6 +44,16 @@ const instance = await createApp({
   databasePath: join(directory, 'db.sqlite'),
   token,
   clientOrigin: webUrl,
+  modelConfig: {
+    provider: 'openai',
+    baseUrl: 'https://example.invalid/v1',
+    apiKey: 'isolated-production-ui-fixture-key',
+    model: 'production-ui-fixture',
+    enabled: true,
+  },
+  coordinator: async () => ({ role: 'assistant', content: '' }),
+  attention: async () => ({ wake: false }),
+  memoryCuration: { model: async () => ({ memories: [] }) },
 });
 await instance.app.listen({ host: '127.0.0.1', port: 0 });
 const apiUrl = `http://127.0.0.1:${instance.app.server.address().port}`;
