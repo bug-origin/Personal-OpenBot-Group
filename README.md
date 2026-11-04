@@ -6,13 +6,15 @@
 
 ## 下载
 
-安装包与版本说明见 [GitHub Releases](https://github.com/bug-origin/Personal-Agent-Group/releases)。当前提供 macOS Apple Silicon 版本，应用名称为 OpenBot。
+版本、安装包及校验和以 [GitHub Releases](https://github.com/bug-origin/Personal-Agent-Group/releases) 为准。目前验证的平台为 macOS Apple Silicon，应用名称为 OpenBot。
 
 ## 主要能力
 
 - **独立注意力**：结合上下文判断是否参与；私聊、直接 @ 和回复自己跳过判断。礼貌回应日常招呼，尊重他人的对话与任务。
 - **专属记忆**：每个 Bot 的身份、偏好与任务经验持久保存，私聊和群聊之间保持连续，并限制敏感信息的可见范围。
-- **持续任务**：异步执行、真实进度回报、任务状态与异常监控；完成后由 Bot 根据证据验收。
+- **持续目标**：独立于 Worker 接下责任，支持离线安排、下一行动、条件等待、截止时间和所有者决策提醒。
+- **委托与验收**：Bot 之间明确接受委托、交付和复核；项目事实按版本共享，交付物分别记录产出、验证、接受与实际应用。
+- **异步执行**：真实进度、异常监控、停止和续接；完成后由 Bot 根据证据验收。
 - **任务管道**：同一工作的要求变更和后续处理可继续原会话；支持 Codex / Claude Code 执行与接力。
 - **本地协作**：群组管理、@ 协作、Markdown、交互表单、图表和原生权限请求。
 - **关闭窗口后继续**：桌面窗口关闭后隐藏到菜单栏／托盘，后台继续运行；明确退出应用才停止服务。
@@ -40,7 +42,7 @@ npm run desktop
 
 1. 打开底部「设置」，选择模型服务、填写 API Key、获取模型列表并选择主会话模型。
 2. 注意力模型默认跟随主会话，也可以单独选择同一服务的其他模型。
-3. 创建数字员工，填写名称与职责，选择本机已配置的执行工具。
+3. 创建数字员工，填写名称与职责；可用的本机 Agent 会自动连接，离线时也可先创建身份。
 4. 与数字员工单独聊天，或自行创建群组并邀请成员。
 
 模型设置支持 DeepSeek、OpenAI、Anthropic、Gemini、通义千问、Moonshot、智谱及其他 OpenAI 兼容服务。主会话模型负责沟通与调度，本地 Agent 负责文件和系统操作。
@@ -81,48 +83,24 @@ Codex / Claude Code 沿用各自的本机配置与凭据，OpenBot 不复制其�
 
 密钥、数据库、日志、测试输出与构建产物均不属于发布源码。它们已列入 `.gitignore`；不要强制提交这些文件。服务只允许监听本机 loopback 地址，当前不提供多人或远程部署认证。
 
-## 开发与检查
+## 开发与构建
 
 ```sh
 npm run format:check
-npm run typecheck
-npm test
 npm run build
+npm test
 npx playwright install chromium
 npm run test:e2e
 npm run release:check
 ```
 
-单元与浏览器测试使用临时数据和测试适配器，不调用真实模型，也不修改日常聊天。测试截图、跟踪和报告写入 `test-results/` 等忽略目录。
-
-构建桌面安装包：
+自动化测试使用临时数据和测试适配器，不调用真实模型。开发约定、协议生成和专项验证见[贡献指南](CONTRIBUTING.md)。
 
 ```sh
 npm run tauri:build
 ```
 
-构建会准备内置运行环境并验证其独立启动、连接、持久化及退出恢复。macOS 产物位于 `apps/desktop/src-tauri/target/release/bundle/`，文件名跟随项目版本。当前未配置自动更新。
-
-维护者发布 macOS 包时，通过环境变量指定本机的 Developer ID Application 证书和已保存的 notarytool 凭据名称：
-
-```sh
-APPLE_SIGNING_IDENTITY='Developer ID Application: Your Organization (TEAMID)' \
-APPLE_NOTARY_PROFILE='your-keychain-profile' npm run tauri:build
-```
-
-流程会签名内置 Node.js、SQLite 模块和应用，验证实际打包的后台，再公证应用与 DMG、附加公证票据并生成 `SHA256SUMS`。未指定证书或公证配置时，仅构建对应的本地测试包。签名已完成后，也可使用相同环境变量运行 `npm run tauri:build -- --notarize-only` 完成公证与重新生成 DMG。凭据只从本机钥匙串读取，不写入源码。
-
-发布前检查会扫描 Git 待发布文件中的常见密钥、本机路径、数据库和构建残留；它不能替代人工检查。更改 UI 协议后运行 `npm run generate:ui`，并提交生成的静态校验器与组件目录。
-
-真实模型验证需手动运行，可能产生 API 或本地 Agent 费用：
-
-```sh
-node --import tsx scripts/smoke-attention.mjs --live
-node --import tsx scripts/smoke-social.mjs --live
-node --import tsx scripts/smoke-coordinator.mjs
-```
-
-这些脚本使用假设输入或临时数据库；不会向日常群组发消息。其他专项检查见对应文档。
+构建会准备内置运行环境并验证其独立启动与恢复。未配置签名、公证时生成本地测试包。正式 macOS 发布需要目标团队的 Developer ID 证书和公证凭据，完整流程见[构建与发布](docs/releasing.md)。
 
 ## 项目结构
 
@@ -139,12 +117,12 @@ docs/                  架构、提示词与接入说明
 
 ## 文档
 
-- [整体架构](docs/architecture.md)
-- [持续工作、记忆与任务管道](docs/super-agent.md)
-- [当前提示词](docs/prompts-current.md)
-- [Claude Code 接入](docs/claude.md)
-- [原生提问与权限交互](docs/native-interactions.md)
-- [动态卡片与渲染](docs/dynamic-rendering.md)
+- [文档索引](docs/README.md)
+- [整体架构](docs/architecture.md)与[持续工作设计](docs/super-agent.md)
+- [贡献指南](CONTRIBUTING.md)
+- [故障排查与数据恢复](docs/troubleshooting.md)
+- [安全说明与漏洞报告](SECURITY.md)
+- [构建与发布](docs/releasing.md)
 
 ## 许可证
 

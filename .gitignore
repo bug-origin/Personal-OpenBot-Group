@@ -23,6 +23,18 @@ model-settings.json.*.tmp
 *.key
 *.p12
 *.pfx
+*.p8
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+# Ad hoc release archives must not enter source control.
+*.dmg
+*.app/
+*.zip
+*.tar.gz
 
 # Test output, logs and editor files
 playwright-report/

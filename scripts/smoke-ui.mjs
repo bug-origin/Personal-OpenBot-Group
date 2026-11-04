@@ -143,13 +143,13 @@ try {
     state: { data: {}, form: { name: '', scope: 'architecture' }, ui: {} },
   };
   await api(`/api/groups/${group}/cards`, { botId: bots[0], document });
-  await page.getByRole('textbox', { name: '项目名称', exact: true }).fill('NAAnaa-harness');
+  await page.getByRole('textbox', { name: '项目名称', exact: true }).fill('OpenBot Demo');
   await page.getByRole('radio', { name: '安全检查', exact: true }).check();
   await page.reload();
   await page.getByRole('textbox', { name: '项目名称', exact: true }).waitFor();
   if (
     (await page.getByRole('textbox', { name: '项目名称', exact: true }).inputValue()) !==
-    'NAAnaa-harness'
+    'OpenBot Demo'
   )
     throw new Error('draft lost');
   await page.getByRole('textbox', { name: '项目名称', exact: true }).scrollIntoViewIfNeeded();

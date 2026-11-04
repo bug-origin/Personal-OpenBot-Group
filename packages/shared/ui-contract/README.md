@@ -98,7 +98,7 @@ currency percent`. Formatting is locale independent (`,` thousands, `.` decimals
 
 The main Bot and local workers receive the shared capability instructions from
 `packages/shared/src/ui/prompt.ts` and `apps/bridge/src/instructions.ts`.
-Their complete current prompts are documented in [the prompt reference](../../../docs/prompts-current.md).
+Runtime prompt sources and responsibilities are listed in [the prompt reference](../../../docs/prompts.md).
 
 Charts use ECharts; diagrams use Mermaid with restricted rendering and sanitization.
 Maps are currently disabled, with supplied places still displayed as text. No private

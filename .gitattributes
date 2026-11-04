@@ -24,3 +24,17 @@ apps/desktop/dist export-ignore
 apps/desktop/src-tauri/target export-ignore
 apps/desktop/src-tauri/gen export-ignore
 apps/desktop/src-tauri/runtime export-ignore
+*.p8 export-ignore
+*.cer export-ignore
+*.certSigningRequest export-ignore
+*.mobileprovision export-ignore
+*.provisionprofile export-ignore
+*.p12 export-ignore
+*.pfx export-ignore
+*.pem export-ignore
+*.key export-ignore
+*.keychain export-ignore
+*.keychain-db export-ignore
+*.dmg export-ignore
+*.zip export-ignore
+*.tar.gz export-ignore

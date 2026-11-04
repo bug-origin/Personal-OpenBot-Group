@@ -12,7 +12,15 @@ const application = join(bundle, 'macos/OpenBot.app');
 const destination = join(bundle, 'dmg', `OpenBot_${version}_${process.arch}.dmg`);
 const identity = process.env.APPLE_SIGNING_IDENTITY;
 const profile = process.env.APPLE_NOTARY_PROFILE;
+const teamId = process.env.APPLE_TEAM_ID;
 const notarizeOnly = process.argv.includes('--notarize-only');
+
+if (identity || profile || notarizeOnly) {
+  if (!teamId || !/^[A-Z0-9]{10}$/.test(teamId))
+    throw new Error('Signing requires an explicit APPLE_TEAM_ID (10 uppercase letters/digits)');
+  if (!identity?.startsWith('Developer ID Application: ') || !identity.endsWith(`(${teamId})`))
+    throw new Error('APPLE_SIGNING_IDENTITY must be a Developer ID Application for APPLE_TEAM_ID');
+}
 
 async function run(command, args, env = process.env, capture = false) {
   return new Promise((resolve, reject) => {
@@ -34,10 +42,26 @@ async function run(command, args, env = process.env, capture = false) {
     child.on('error', reject);
     child.on('exit', (code) =>
       code === 0
-        ? resolve(output)
+        ? resolve(capture === 'combined' ? output + error : output)
         : reject(new Error(`${command} exited with ${code}${capture ? `: ${error.trim()}` : ''}`)),
     );
   });
+}
+
+async function verifySigningTeam(path) {
+  await run('codesign', ['--verify', '--deep', '--strict', path]);
+  const details = await run(
+    'codesign',
+    ['--display', '--verbose=4', path],
+    process.env,
+    'combined',
+  );
+  if (!details.split(/\r?\n/).includes(`TeamIdentifier=${teamId}`))
+    throw new Error(
+      'Application signature does not match APPLE_TEAM_ID; rebuild with the correct certificate',
+    );
+  if (!details.includes('Authority=Developer ID Application: '))
+    throw new Error('Application must have a Developer ID Application signature');
 }
 
 async function signApplication() {
@@ -55,6 +79,7 @@ async function signApplication() {
   await signLibraries(join(runtime, 'node_modules'));
   await run('codesign', [...sign, application]);
   await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', application]);
+  await verifySigningTeam(application);
 }
 
 async function notarize(path, label) {
@@ -136,7 +161,7 @@ if (process.platform === 'darwin') {
   try {
     if (profile) {
       if (!identity) throw new Error('Notarization requires APPLE_SIGNING_IDENTITY');
-      await run('codesign', ['--verify', '--deep', '--strict', application]);
+      await verifySigningTeam(application);
       const archive = join(staging, 'OpenBot.zip');
       await run('ditto', ['-c', '-k', '--keepParent', application, archive]);
       submissions.application = await notarize(archive, 'application archive');
@@ -194,6 +219,7 @@ if (process.platform === 'darwin') {
           arch: process.arch,
           signed: Boolean(identity),
           notarized: Boolean(profile),
+          teamId: identity ? teamId : null,
           submissions,
           sha256,
         },

@@ -5,6 +5,8 @@ node_modules
 package-lock.json
 .data
 test-results
+playwright-report
+coverage
 
 **/schema.generated.ts
 **/catalog.generated.ts

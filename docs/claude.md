@@ -1,12 +1,12 @@
 # Claude Code 本地接入
 
-创建 Bot 时选择 Claude Code 作为首选执行工具，自动连接可用的本机 Agent，然后加入群组。Agent 暂不可用时先保留身份，就绪后自动上线，无需额外绑定。每位 Bot 使用独立的 DeepSeek 主会话判断消息、安排执行和验收结果，沿用现有 DeepSeek 配置。Claude Code 与 Codex 共用进度查询、停止、独立执行会话和动态卡片能力；同一 Bot 可根据任务在两种 Worker 之间接力。
+安装并配置 Claude Code 后，Bridge 自动检测本机执行能力，Bot 创建时连接可用设备。桌面界面不要求手动选择底层执行工具。Agent 暂不可用时先保留身份，就绪后自动上线。每位 Bot 使用设置页配置的对话模型，独立判断消息、安排执行和验收结果。Claude Code 与 Codex 共用进度查询、停止、独立执行会话和动态卡片能力；同一 Bot 可根据任务在两种 Worker 之间接力。
 
 ## 安装与配置
 
 先在本机安装 Claude Code 并运行 `claude auth login`。Bridge 启动时检查 CLI 版本、`auth status` 的实际登录状态和必要受限模式参数。未安装、未登录或接口版本不足时显示不可用原因。
 
-默认从 PATH 查找 `claude`；需要时在项目根 `.env` 配置 `OPENBOT_CLAUDE_PATH=/absolute/path/to/claude`，重启本地 Bridge 生效。沿用 CLI 自身的登录，不需要把 Claude 凭据填写到客户端。平台的 DeepSeek 和 OpenBot 凭据在启动原生进程前移除。
+默认从 PATH 查找 `claude`；需要时在项目根 `.env` 配置 `OPENBOT_CLAUDE_PATH=/absolute/path/to/claude`，重启本地 Bridge 生效。沿用 CLI 自身的登录，不需要把 Claude 凭据填写到客户端。`BRAIN_*`、`DEEPSEEK_*` 和 `OPENBOT_*` 等平台变量在启动原生进程前移除，保留 CLI 自身需要的认证配置。
 
 如果 CLI 的认证与模型通过用户 `settings.json` 的环境变量配置，Bridge 仅将认证、服务地址和模型相关白名单变量传给原生进程，进程已有变量优先；支持 `CLAUDE_CONFIG_DIR`。不会加载该文件中的 hooks、插件或密钥辅助程序，也不会把凭据放进命令行参数、群消息或客户端。这样受限模式可以继续使用本机已配置的 Provider。
 
