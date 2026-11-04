@@ -23,7 +23,7 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "退出 OpenBot", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
             let mut tray = TrayIconBuilder::new()
-                .tooltip("OpenBot · 后台工作中")
+                .tooltip("OpenBot")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {

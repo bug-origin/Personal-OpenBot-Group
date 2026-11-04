@@ -41,7 +41,7 @@ test('desktop obtains credentials through native IPC, ignores stale browser sett
     await page.evaluate(() => Object.assign(window, { localReady: true }));
     await page.getByRole('button', { name: '重试连接', exact: true }).last().click();
     await expect(page.locator('.statusbar > button')).toContainText('协作服务已连接');
-    await expect(page.getByRole('heading', { name: '从一个想法开始' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '先配置对话模型' })).toBeVisible();
     await expect(page.getByRole('button', { name: '服务连接设置' })).toHaveCount(0);
     expect(await page.evaluate(() => sessionStorage.getItem('openbot.token'))).toBe(
       'old-invalid-token',

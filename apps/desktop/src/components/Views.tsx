@@ -6,12 +6,12 @@ import {
   ArrowRight,
   ArrowUpRight,
   Bot as BotIcon,
+  Camera,
   Hash,
   Link2,
   MessageSquare,
   Plus,
   Search,
-  ShieldCheck,
   Sparkles,
 } from 'lucide-react';
 import type { Bot, Snapshot } from '@openbot/shared';
@@ -22,23 +22,23 @@ export function BotsView({
   onCreate,
   onBridge,
   onChat,
+  onAvatar,
 }: {
   data: Snapshot;
   onCreate: () => void;
   onBridge: (bot: Bot) => void;
   onChat: (bot: Bot) => void;
+  onAvatar: (bot: Bot) => void;
 }) {
   return (
     <div className="page-view">
-      <div className="page-eyebrow">YOUR DIGITAL TEAM</div>
       <div className="page-title">
         <div>
           <h1>数字员工</h1>
-          <p>不同的能力，相同的目标。认识你的 AI 协作伙伴。</p>
         </div>
         <Button className="accent-button" onPress={onCreate}>
           <Plus size={17} />
-          创建 Bot
+          创建数字员工
         </Button>
       </div>
       <div className="stats-strip">
@@ -49,7 +49,7 @@ export function BotsView({
         </div>
         <div>
           <span className="green-dot" />
-          <span>在线</span>
+          <span>执行已连接</span>
           <strong>{data.bots.filter((b) => b.status !== 'offline').length}</strong>
         </div>
         <div>
@@ -69,12 +69,22 @@ export function BotsView({
               key={bot.id}
             >
               <div className="bot-profile-top">
-                <BotAvatar bot={bot} size="large" />
+                <button
+                  className="bot-avatar-edit"
+                  aria-label={`修改 ${bot.name} 的头像`}
+                  onClick={() => onAvatar(bot)}
+                  title="修改头像"
+                >
+                  <BotAvatar bot={bot} size="large" />
+                  <span className="bot-avatar-edit-icon">
+                    <Camera size={12} />
+                  </span>
+                </button>
                 <Status status={bot.status} />
               </div>
               <h2>{bot.name}</h2>
-              <span className="provider-tag">本地能力</span>
-              <p>{bot.description || '这位数字员工的故事，等你来定义。'}</p>
+
+              {bot.description && <p>{bot.description}</p>}
               <div className="bot-profile-groups">
                 <Hash size={13} />
                 {data.groups.filter((g) => !g.directBotId && g.botIds.includes(bot.id)).length}{' '}
@@ -87,7 +97,7 @@ export function BotsView({
               </Button>
               <Button variant="outline" fullWidth onPress={() => onBridge(bot)}>
                 <Link2 size={15} />
-                查看 Agent 状态
+                查看执行状态
                 <ArrowUpRight size={15} />
               </Button>
             </motion.div>
@@ -96,8 +106,7 @@ export function BotsView({
             <span>
               <Plus size={25} />
             </span>
-            <strong>下一位好同事</strong>
-            <p>为团队带来新的可能</p>
+            <strong>创建数字员工</strong>
           </button>
         </div>
       ) : (
@@ -110,20 +119,12 @@ export function BotsView({
               <Sparkles size={20} />
             </i>
           </div>
-          <h2>你的团队，拥有无限可能</h2>
-          <p>
-            把本地执行能力，
-            <br />
-            变成独立的数字员工。
-          </p>
+          <h2>还没有数字员工</h2>
+
           <Button className="accent-button" onPress={onCreate}>
             <Plus size={17} />
             创建第一位数字员工
           </Button>
-          <small>
-            <ShieldCheck size={13} />
-            独立身份 · 本地能力 · 你的授权
-          </small>
         </div>
       )}
     </div>
@@ -139,24 +140,22 @@ export function ActivityView({ data, onGroup }: { data: Snapshot; onGroup: (id: 
     .reverse();
   return (
     <div className="page-view">
-      <div className="page-eyebrow">EVERY STEP, TOGETHER</div>
       <div className="page-title">
         <div>
           <h1>活动记录</h1>
-          <p>每一次交流，每一步进展，都留在这里。</p>
         </div>
         <span className="history-count">
-          {messages.length} 条消息 · {workCount} 项工作
+          {messages.length} 条消息 · {goals.length} 个目标 · {data.tasks.length} 项任务
         </span>
       </div>
       <div className="activity-tabs">
         <button className={tab === 'messages' ? 'active' : ''} onClick={() => setTab('messages')}>
           <MessageSquare size={16} />
-          协作消息<span>{messages.length}</span>
+          消息<span>{messages.length}</span>
         </button>
         <button className={tab === 'tasks' ? 'active' : ''} onClick={() => setTab('tasks')}>
           <Activity size={16} />
-          工作进展<span>{workCount}</span>
+          目标与任务<span>{workCount}</span>
         </button>
       </div>
       {tab === 'messages' ? (
@@ -171,12 +170,10 @@ export function ActivityView({ data, onGroup }: { data: Snapshot; onGroup: (id: 
                   <strong>
                     {data.bots.find((b) => b.id === m.senderId)?.name ?? '我'}
                     <span>
-                      在 {data.groups.find((g) => g.id === m.groupId)?.directBotId ? '与 ' : '#'}
-                      {data.groups.find((g) => g.id === m.groupId)?.name}
                       {data.groups.find((g) => g.id === m.groupId)?.directBotId
-                        ? ' 的单独聊天'
-                        : ''}{' '}
-                      中发送了消息
+                        ? '私聊 · '
+                        : '群组 · '}
+                      {data.groups.find((g) => g.id === m.groupId)?.name}
                     </span>
                   </strong>
                   <p>{m.content}</p>
@@ -198,8 +195,8 @@ export function ActivityView({ data, onGroup }: { data: Snapshot; onGroup: (id: 
         ) : (
           <EmptySmall
             icon={<MessageSquare size={25} />}
-            title="让第一段对话，成为新的起点"
-            description="群组中的消息会实时出现在这里。"
+            title="还没有消息"
+            description="私聊和群组消息会显示在这里。"
           />
         )
       ) : workCount ? (
@@ -226,7 +223,7 @@ export function ActivityView({ data, onGroup }: { data: Snapshot; onGroup: (id: 
         <EmptySmall
           icon={<Activity size={25} />}
           title="还没有工作记录"
-          description="交给数字员工持续负责的目标与执行进展会保存在这里。"
+          description="目标和任务进展会显示在这里。"
         />
       )}
     </div>
@@ -258,12 +255,12 @@ export function SearchDialog({
         .reverse()
     : [];
   return (
-    <Dialog open onClose={onClose} title="搜索消息和 Bot" wide>
+    <Dialog open onClose={onClose} title="搜索" wide>
       <div className="global-search">
         <Search size={19} />
         <input
           autoFocus
-          aria-label="搜索消息和 Bot"
+          aria-label="搜索群组、数字员工和消息"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="搜索群组、数字员工和消息…"
@@ -306,7 +303,7 @@ export function SearchDialog({
                 <BotAvatar bot={b} size="small" />
                 <div>
                   <strong>{b.name}</strong>
-                  <small>本地执行能力</small>
+                  {b.description && <small>{b.description}</small>}
                 </div>
                 <Status status={b.status} />
               </button>
@@ -341,12 +338,11 @@ export function SearchDialog({
           <EmptySmall
             icon={<Search size={23} />}
             title="没有找到相关结果"
-            description="换个关键词，再试试看。"
+            description="试试其他关键词。"
           />
         )}
       </div>
       <div className="search-footer">
-        <span>搜索消息、Bot 和群组</span>
         <span>{groups.length + bots.length + messages.length} 项结果</span>
       </div>
     </Dialog>

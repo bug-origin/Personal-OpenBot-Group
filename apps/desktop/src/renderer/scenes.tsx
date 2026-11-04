@@ -205,7 +205,7 @@ export function Scene({ p, children }: { p: Props; children: ReactNode }) {
             <span className="scene-success-icon">
               <Icon name="check" size={12} />
             </span>
-            <strong>{p.title ?? 'Purchase complete'}</strong>
+            <strong>{p.title ?? '购买完成'}</strong>
           </div>
           <hr />
           <div className="row">
@@ -219,7 +219,7 @@ export function Scene({ p, children }: { p: Props; children: ReactNode }) {
           </div>
           <DetailRows rows={c.details} />
           <div className="row spread">
-            <strong>Paid</strong>
+            <strong>实付金额</strong>
             <strong>{money(c.paid?.amount ?? 0, c.paid?.currency)}</strong>
           </div>
         </div>

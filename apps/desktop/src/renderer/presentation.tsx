@@ -5,7 +5,7 @@ import { soft, useEntered } from './motion';
 import { ChevronDown } from 'lucide-react';
 import type { Props } from './charts';
 
-export function CodeView({ code, language = 'Code' }: { code: string; language?: string }) {
+export function CodeView({ code, language = '代码' }: { code: string; language?: string }) {
   const [status, setStatus] = useState('复制');
   useEffect(() => setStatus('复制'), [code]);
   return (

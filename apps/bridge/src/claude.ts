@@ -110,9 +110,13 @@ export class ClaudeExecution implements AgentExecution {
                 ? '正在读取文件'
                 : t.name === 'Glob'
                   ? '正在查找文件'
-                  : t.name === 'Grep'
-                    ? '正在搜索代码'
-                    : '正在处理工具调用',
+                  : t.name === 'WebSearch'
+                    ? '正在联网搜索'
+                    : t.name === 'WebFetch'
+                      ? '正在读取网页'
+                      : t.name === 'Grep'
+                        ? '正在搜索代码'
+                        : '正在处理工具调用',
             )
             .join('；'),
           text ? text.slice(-4000) : undefined,
@@ -129,9 +133,17 @@ export class ClaudeExecution implements AgentExecution {
         !this.initialized ||
         typeof id !== 'string' ||
         request?.subtype !== 'can_use_tool' ||
-        !['Read', 'Glob', 'Grep', 'Bash', 'Edit', 'Write', 'AskUserQuestion'].includes(
-          request.tool_name,
-        ) ||
+        ![
+          'Read',
+          'Glob',
+          'Grep',
+          'WebSearch',
+          'WebFetch',
+          'Bash',
+          'Edit',
+          'Write',
+          'AskUserQuestion',
+        ].includes(request.tool_name) ||
         !this.callbacks.interaction ||
         this.cancelled
       ) {
@@ -141,7 +153,9 @@ export class ClaudeExecution implements AgentExecution {
       if (this.interactions.has(id)) return;
       if (
         this.job.resourceMode === 'read' &&
-        !['Read', 'Glob', 'Grep', 'AskUserQuestion'].includes(request.tool_name)
+        !['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'AskUserQuestion'].includes(
+          request.tool_name,
+        )
       ) {
         this.controlReply(id, {
           behavior: 'deny',
@@ -212,10 +226,10 @@ export class ClaudeExecution implements AgentExecution {
         '{"mcpServers":{}}',
         '--tools',
         this.job.resourceMode === 'read'
-          ? 'Read,Glob,Grep,AskUserQuestion'
-          : 'Read,Glob,Grep,Bash,Edit,Write,AskUserQuestion',
+          ? 'Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion'
+          : 'Read,Glob,Grep,WebSearch,WebFetch,Bash,Edit,Write,AskUserQuestion',
         '--allowedTools',
-        'Read,Glob,Grep',
+        'Read,Glob,Grep,WebSearch',
         '--permission-mode',
         'manual',
         '--permission-prompts',
@@ -223,7 +237,7 @@ export class ClaudeExecution implements AgentExecution {
         '--permission-prompt-tool',
         'stdio',
         '--settings',
-        '{"permissions":{"ask":["Bash","Edit","Write"]}}',
+        '{"permissions":{"ask":["Bash","Edit","Write","WebFetch"]}}',
         '--disable-slash-commands',
         '--system-prompt-snapshot',
         'off',

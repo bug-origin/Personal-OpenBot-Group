@@ -184,8 +184,8 @@ function MapOff({ p }: { p: Props }) {
       <div className="map-off-note">
         <MapPinOff size={18} />
         <div>
-          <strong>地图能力暂时关闭</strong>
-          <p>以下是地图中的地点，开启后会恢复地图显示。</p>
+          <strong>当前不支持地图显示</strong>
+          <p>已列出地点信息。</p>
         </div>
       </div>
       {places.length > 0 && (

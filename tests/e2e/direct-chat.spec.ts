@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../../apps/server/src/app';
 import type { AgentJob, BridgeCommand } from '@openbot/shared';
+import { executionModel, testModelConfig } from './model-fixtures';
 
 test('opens a persistent one-to-one chat from a bot and replies without @ or group routing', async ({
   page,
@@ -16,6 +17,9 @@ test('opens a persistent one-to-one chat from a bot and replies without @ or gro
     databasePath: join(directory, 'db.sqlite'),
     token,
     clientOrigin: 'http://127.0.0.1:1421',
+    modelConfig: testModelConfig,
+    coordinator: executionModel,
+    attention: async () => ({ wake: false }),
   });
   await instance.app.listen({ host: '127.0.0.1', port: 0 });
   const address = instance.app.server.address() as { port: number };
@@ -40,9 +44,9 @@ test('opens a persistent one-to-one chat from a bot and replies without @ or gro
       { url, token },
     );
     await page.goto('/');
-    await page.getByRole('button', { name: '创建 Bot', exact: true }).click();
+    await page.getByRole('button', { name: '创建数字员工', exact: true }).first().click();
     const creation = page.getByRole('dialog');
-    await creation.getByLabel('Bot 名称').fill('DirectBob');
+    await creation.getByLabel('数字员工名称').fill('DirectBob');
     await expect(creation.getByText(/创建后自动连接/)).toBeVisible();
     await creation.getByRole('button', { name: '创建数字员工', exact: true }).click();
     await expect(creation).not.toBeVisible();

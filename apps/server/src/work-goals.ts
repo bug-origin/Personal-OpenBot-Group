@@ -512,8 +512,8 @@ export class WorkGoals {
           this.attention(
             id,
             deadline
-              ? '目标已到截止时间，需要负责人说明交付或阻塞'
-              : '连续复核未安排有效后续行动，需要所有者决定',
+              ? '目标已到截止时间，请确认交付情况或调整安排。'
+              : '目标尚未安排后续行动，请确认下一步。',
           );
         else
           this.store.db

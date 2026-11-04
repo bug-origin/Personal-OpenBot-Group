@@ -18,3 +18,9 @@ native modules. Frontend dependency notices are generated alongside the web asse
 Codex CLI, Claude Code and model APIs are external integrations; their executables,
 accounts and credentials are not included in this source release. Example URLs in
 UI fixtures refer to external services and do not grant rights to their content.
+
+The Codex and Claude SVG marks in `apps/desktop/public/logos/` are from
+[LobeHub Icons](https://github.com/lobehub/lobe-icons), under the MIT License.
+Their copyright and license are included in `apps/desktop/public/logos/LICENSE.txt`
+and distributed with the frontend assets. Brand names and marks belong to their
+respective owners.

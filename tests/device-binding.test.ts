@@ -125,6 +125,57 @@ it('requires a valid same-request choice when multiple compatible devices are av
   }
 });
 
+it('saves execution selection offline, validates compatible devices and restores the selection after restart', async () => {
+  const path = databasePath();
+  const token = 'device-binding-client-test-token';
+  let instance = await createApp({ databasePath: path, token });
+  const api = (method: 'POST' | 'PATCH', url: string, payload: unknown) =>
+    instance.app.inject({ method, url, payload, headers: { authorization: `Bearer ${token}` } });
+  try {
+    const id = (await api('POST', '/api/bots', { name: 'Selectable', provider: 'codex' })).json()
+      .id;
+    connect(instance, 'codex-device', 'codex');
+    expect(
+      (
+        await api('PATCH', `/api/bots/${id}/execution`, {
+          provider: 'claude-code',
+          bridgeId: 'codex-device',
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(
+      (await api('PATCH', `/api/bots/${id}/execution`, { provider: 'unsupported' })).statusCode,
+    ).toBe(400);
+    expect(
+      (await api('PATCH', '/api/bots/missing/execution', { provider: 'claude-code' })).statusCode,
+    ).toBe(404);
+    expect(
+      (await api('PATCH', `/api/bots/${id}/execution`, { provider: 'claude-code' })).statusCode,
+    ).toBe(200);
+    expect(instance.store.snapshot().bots[0]).toMatchObject({
+      provider: 'claude-code',
+      bridgeId: null,
+      status: 'offline',
+    });
+    await instance.app.close();
+    instance = await createApp({ databasePath: path, token });
+    connect(instance, 'codex-device', 'codex');
+    expect(instance.store.snapshot().bots[0]).toMatchObject({
+      provider: 'claude-code',
+      bridgeId: null,
+      status: 'offline',
+    });
+    connect(instance, 'claude-device', 'claude-code');
+    expect(instance.store.snapshot().bots[0]).toMatchObject({
+      provider: 'claude-code',
+      bridgeId: 'claude-device',
+      status: 'idle',
+    });
+  } finally {
+    await instance.app.close();
+  }
+});
+
 it('migrates legacy bindings without losing identities, history, or native sessions, and reopens safely', () => {
   const path = databasePath();
   const legacy = new Database(path);
@@ -204,7 +255,7 @@ it('migrates legacy bindings without losing identities, history, or native sessi
       ).not.toContain('working_directory');
       expect(
         store.db.prepare('SELECT version FROM schema_migrations ORDER BY version').all(),
-      ).toHaveLength(15);
+      ).toHaveLength(16);
     } finally {
       store.db.close();
     }
@@ -329,6 +380,7 @@ it('binds and dispatches using only a device, including a resumed persisted bind
     const snapshot = (await api('/api/snapshot')).json();
     expect(snapshot.bots[0].status).toBe('idle');
     expect(Object.keys(snapshot.bots[0]).sort()).toEqual([
+      'avatar',
       'bridgeId',
       'createdAt',
       'description',

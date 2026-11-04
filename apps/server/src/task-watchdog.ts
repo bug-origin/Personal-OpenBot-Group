@@ -65,7 +65,7 @@ export class TaskWatchdog {
     let detail = task.error ?? '';
     if (task.status === 'queued') {
       state = this.hooks.connected(task.botId) ? 'queued' : 'waiting_device';
-      detail = state === 'queued' ? '等待管道、资源或执行名额' : '等待本地执行连接';
+      detail = state === 'queued' ? '等待其他任务释放执行资源' : '等待本地执行连接';
       const owner = task.goalId
         ? (this.store.db
             .prepare('SELECT owner_wait,attention_reason FROM work_goals WHERE id=?')
@@ -74,27 +74,27 @@ export class TaskWatchdog {
         : undefined;
       if (owner?.owner_wait) {
         state = 'waiting_owner';
-        detail = owner.attention_reason ?? '等待所有者决定目标的后续安排';
+        detail = owner.attention_reason ?? '等待你决定下一步';
       }
     } else if (['running', 'cancelling'].includes(task.status)) {
       if (pending) {
         state = 'waiting_permission';
-        detail = '等待所有者回答或授权，不视为异常';
+        detail = '等待你回答或授权';
       } else if (task.status === 'running' && report?.kind === 'blocked') {
         state = 'blocked';
-        detail = `执行方报告受阻，需核实：${report.summary.slice(0, 500)}`;
+        detail = `执行受阻：${report.summary.slice(0, 500)}`;
       } else if (task.status === 'running' && now - Date.parse(latest) >= staleAfter) {
         const heartbeat = old.last_heartbeat_at ?? task.startedAt ?? latest;
         state = now - Date.parse(heartbeat) >= heartbeatAfter ? 'unresponsive' : 'stalled';
         detail =
           state === 'unresponsive'
-            ? '执行心跳超时，需要核实连接；未自动重跑'
-            : '任务连接仍在，但近期没有新进展，需要复核';
+            ? '长时间未收到执行状态，请检查本地连接；未自动重试'
+            : '执行仍在连接，但近期没有新进展';
       }
     } else if (task.status === 'failed' && run?.status === 'unknown') {
       state = 'unknown';
-      detail = '连接已中断，执行结果尚未核实；未自动重跑';
-    } else if (task.status === 'reviewing') detail = '执行结果已返回，等待 Bot 验收';
+      detail = '连接已中断，执行结果尚未确认；未自动重试';
+    } else if (task.status === 'reviewing') detail = '执行结果已返回，等待验收';
     const health = {
       state,
       detail,

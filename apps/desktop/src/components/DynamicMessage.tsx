@@ -44,15 +44,13 @@ export default function DynamicMessage({
         document={document}
         disabled={ui.status !== 'pending'}
         readOnlyNote={
-          ui.status === 'superseded'
-            ? '这张卡片已有更新，仅供查看。'
-            : (ui.response ?? '已经收到你的选择。')
+          ui.status === 'superseded' ? '卡片已更新，此版本仅供查看。' : (ui.response ?? '已提交')
         }
         onStateChange={(state) =>
           sessionStorage.setItem(key, JSON.stringify({ form: state.form, ui: state.ui }))
         }
         onAction={async (envelope) => {
-          if (!connected) throw new Error('连接恢复后就可以提交，填写的内容会保留。');
+          if (!connected) throw new Error('连接已断开，填写内容已保留，恢复后可提交。');
           await onAction(message.id, envelope);
           sessionStorage.removeItem(key);
         }}

@@ -38,6 +38,30 @@ afterEach(async () => {
   rmSync(directory, { recursive: true, force: true });
 });
 
+it.each([
+  { enabled: false, apiKey: 'isolated-key', model: 'chat-model' },
+  { enabled: true, apiKey: undefined, model: 'chat-model' },
+  { enabled: true, apiKey: 'isolated-key', model: '' },
+  { enabled: true, apiKey: 'isolated-key', model: '   ' },
+])(
+  'requires an enabled model, credentials and a model ID for setup readiness: %j',
+  async (config) => {
+    await instance!.app.close();
+    instance = await createApp({
+      databasePath: join(directory, 'db.sqlite'),
+      token,
+      modelConfig: { ...readBrainConfig({}), ...config },
+    });
+    expect((await api('/api/snapshot')).json().model.configured).toBe(false);
+    expect((await api('/api/settings/model')).json().enabled).toBe(false);
+    expect(instance.runtime.hasCoordinator).toBe(false);
+    await api('/api/settings/model', saved);
+    expect((await api('/api/snapshot')).json().model.configured).toBe(true);
+    expect((await api('/api/settings/model')).json().enabled).toBe(true);
+    expect(instance.runtime.hasCoordinator).toBe(true);
+  },
+);
+
 it('starts without a seeded group and preserves settings privately across restart', async () => {
   expect((await api('/api/snapshot')).json().groups).toEqual([]);
   expect((await api('/api/settings/model', saved)).statusCode).toBe(200);

@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { resolveMentions, type Message } from '@openbot/shared';
 import {
   botSchema,
+  botAvatarUpdateSchema,
   groupSchema,
   messageSchema,
   nativeRequestSchema,
@@ -49,7 +50,7 @@ export async function createApp(options: {
     return model(messages, signal);
   };
   const coordinator =
-    options.coordinator ?? (settings.current().enabled ? configuredCoordinator : undefined);
+    options.coordinator ?? (settings.isConfigured() ? configuredCoordinator : undefined);
   const configuredAttention: AttentionModel = async (input, signal) => {
     const config = settings.current();
     const model = createAttentionModel({ ...config, model: config.attentionModel || config.model });
@@ -88,7 +89,7 @@ export async function createApp(options: {
   app.addHook('preHandler', async (req, reply) => {
     if (req.url === '/health' || req.url === '/events' || req.url === '/bridge') return;
     if (!validToken(req.headers.authorization?.replace(/^Bearer /, '') ?? ''))
-      return reply.code(401).send({ error: '连接令牌无效，请检查连接设置' });
+      return reply.code(401).send({ error: '本地连接已失效，请重试连接' });
   });
   function broadcast() {
     store.changed();
@@ -133,7 +134,7 @@ export async function createApp(options: {
     model: {
       provider: settings.current().provider,
       name: settings.current().model,
-      configured: settings.current().enabled,
+      configured: settings.isConfigured(),
     },
     maxRounds: runtime.maxRounds,
   }));
@@ -271,7 +272,8 @@ export async function createApp(options: {
   app.post('/api/groups', async (req, reply) => {
     const body = groupSchema.parse(req.body),
       s = store.snapshot();
-    if (body.botIds.some((id) => !s.bots.some((b) => b.id === id))) throw fail(400, 'Bot 不存在');
+    if (body.botIds.some((id) => !s.bots.some((b) => b.id === id)))
+      throw fail(400, '数字员工不存在');
     const id = store.id();
     store.db.transaction(() => {
       store.db
@@ -288,9 +290,8 @@ export async function createApp(options: {
     const body = groupSchema.parse(req.body),
       s = store.snapshot();
     if (!s.groups.some((g) => g.id === id)) throw fail(404, '群组不存在');
-    if (s.groups.find((g) => g.id === id)?.directBotId)
-      throw fail(409, '单独聊天的参与者固定为你和该 Bot，无需修改群组设置');
-    if (body.botIds.some((b) => !s.bots.some((x) => x.id === b))) throw fail(400, 'Bot 不存在');
+    if (s.groups.find((g) => g.id === id)?.directBotId) throw fail(409, '单独聊天不能修改成员');
+    if (body.botIds.some((b) => !s.bots.some((x) => x.id === b))) throw fail(400, '数字员工不存在');
     store.db.transaction(() => {
       store.db
         .prepare('UPDATE groups SET name=?,description=? WHERE id=?')
@@ -311,30 +312,50 @@ export async function createApp(options: {
     const body = botSchema.extend({ bridgeId: z.string().min(1).optional() }).parse(req.body),
       s = store.snapshot();
     if (s.bots.some((b) => b.name.toLowerCase() === body.name.toLowerCase()))
-      throw fail(409, '这个 Bot 名称已被使用');
+      throw fail(409, '数字员工名称已被使用');
     const bridgeId = runtime.creationBridge(body.provider, body.bridgeId);
     const id = store.id();
-    store.db
-      .prepare('INSERT INTO bots VALUES(?,?,?,?,?,?,?,?)')
-      .run(
-        id,
-        'user_local',
-        body.name,
-        body.description,
-        body.provider,
-        bridgeId ? 'idle' : 'offline',
-        bridgeId,
-        new Date().toISOString(),
-      );
+    store.db.transaction(() => {
+      store.db
+        .prepare('INSERT INTO bots VALUES(?,?,?,?,?,?,?,?)')
+        .run(
+          id,
+          'user_local',
+          body.name,
+          body.description,
+          body.provider,
+          bridgeId ? 'idle' : 'offline',
+          bridgeId,
+          new Date().toISOString(),
+        );
+      if (body.avatar)
+        store.db
+          .prepare('INSERT INTO bot_avatars VALUES(?,?,?)')
+          .run(id, body.avatar.type, body.avatar.value);
+    })();
     broadcast();
     return reply.code(201).send({ id });
+  });
+  app.patch<{ Params: { id: string } }>('/api/bots/:id/avatar', async (req) => {
+    const { avatar } = botAvatarUpdateSchema.parse(req.body);
+    if (!store.db.prepare('SELECT id FROM bots WHERE id=?').get(req.params.id))
+      throw fail(404, '数字员工不存在');
+    if (avatar)
+      store.db
+        .prepare(
+          'INSERT INTO bot_avatars VALUES(?,?,?) ON CONFLICT(bot_id) DO UPDATE SET type=excluded.type,value=excluded.value',
+        )
+        .run(req.params.id, avatar.type, avatar.value);
+    else store.db.prepare('DELETE FROM bot_avatars WHERE bot_id=?').run(req.params.id);
+    broadcast();
+    return { ok: true };
   });
   app.delete('/api/bots/:id', async (req) => {
     const { id } = req.params as { id: string };
     const bot = store.snapshot().bots.find((b) => b.id === id);
-    if (!bot) throw fail(404, 'Bot 不存在');
+    if (!bot) throw fail(404, '数字员工不存在');
     // Keep the durable identity and message attribution; removal is intentionally unsupported in stage 1.
-    throw fail(409, 'Bot 是持久身份。当前版本支持从群组移除，暂不支持删除历史身份。');
+    throw fail(409, '暂不支持删除数字员工，可将其移出群组。');
   });
   app.post<{ Params: { id: string } }>('/api/bots/:id/chat', async (req, reply) => {
     z.object({})
@@ -342,7 +363,7 @@ export async function createApp(options: {
       .parse(req.body ?? {});
     const s = store.snapshot();
     const bot = s.bots.find((b) => b.id === req.params.id);
-    if (!bot) throw fail(404, 'Bot 不存在');
+    if (!bot) throw fail(404, '数字员工不存在');
     const existing = s.groups.find((g) => g.directBotId === bot.id);
     if (existing) return { id: existing.id };
     const id = store.id();
@@ -376,7 +397,7 @@ export async function createApp(options: {
       throw fail(400, '回复消息不属于当前群组');
     const mentions = resolveMentions(body.content, s.bots);
     if (mentions.some((id) => !group.botIds.includes(id)))
-      throw fail(400, '提及的 Bot 尚未加入这个群组');
+      throw fail(400, '提及的数字员工尚未加入群组');
     if (body.mentions.some((id) => !mentions.includes(id))) throw fail(400, '提及与消息内容不一致');
     const message: Message = {
       id: body.id,
@@ -409,6 +430,15 @@ export async function createApp(options: {
   app.post<{ Params: { id: string } }>('/api/native-requests/:id/reply', async (req) =>
     runtime.native.reply(req.params.id, nativeReplySchema.parse(req.body)),
   );
+  app.patch('/api/bots/:id/execution', async (req) => {
+    const body = botSchema
+      .pick({ provider: true })
+      .extend({ bridgeId: z.string().min(1).optional() })
+      .strict()
+      .parse(req.body);
+    runtime.configureExecution((req.params as { id: string }).id, body.provider, body.bridgeId);
+    return { ok: true };
+  });
   app.post('/api/bots/:id/bind', async (req) => {
     const body = z
       .object({ bridgeId: z.string().min(1) })

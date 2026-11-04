@@ -23,7 +23,7 @@ import type { Bot, Group } from '@openbot/shared';
 import { resolveMentions, statusLabel } from '@openbot/shared';
 import { useOpenBot } from './lib/useOpenBot';
 import { BotAvatar, IconButton, Shortcut } from './components/Primitives';
-import { BotDialog, BridgeDialog, GroupDialog } from './components/Dialogs';
+import { BotAvatarDialog, BotDialog, BridgeDialog, GroupDialog } from './components/Dialogs';
 import { Timeline } from './components/Timeline';
 import { Overview } from './components/Overview';
 import { ActivityView, BotsView, SearchDialog } from './components/Views';
@@ -32,6 +32,7 @@ type View = 'group' | 'bots' | 'activity' | 'settings';
 type ModalState =
   | { type: 'group'; group?: Group }
   | { type: 'bot' }
+  | { type: 'avatar'; botId: string }
   | { type: 'bridge'; bot?: Bot }
   | { type: 'search' }
   | null;
@@ -47,6 +48,7 @@ export default function App() {
   const group = data?.groups.find((g) => g.id === groupId) ?? data?.groups[0];
   const directBot = data?.bots.find((bot) => bot.id === group?.directBotId);
   const connected = status === 'connected';
+  const needsModelSetup = Boolean(data && !data.model?.configured);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -71,13 +73,33 @@ export default function App() {
     setSearchOpen(Boolean(query));
     setSidebar(false);
   }
+  function configureModel() {
+    setModal(null);
+    setView('settings');
+    setSidebar(false);
+  }
+  function requireModel() {
+    if (!data) return false;
+    if (!data.model?.configured) {
+      configureModel();
+      return false;
+    }
+    return true;
+  }
+  function createGroup(group?: Group) {
+    if (!requireModel()) return;
+    setModal({ type: 'group', group });
+  }
   function createBot() {
+    if (!requireModel()) return;
     setModal({ type: 'bot' });
   }
   function showBridge(bot?: Bot) {
+    if (!requireModel()) return;
     setModal({ type: 'bridge', bot });
   }
   async function openChat(bot: Bot) {
+    if (!requireModel()) return;
     try {
       const chat = await mutate<{ id: string }>(`/api/bots/${bot.id}/chat`, {});
       selectGroup(chat.id);
@@ -86,7 +108,7 @@ export default function App() {
     }
   }
   async function send(content: string, replyTo: string | null, id: string) {
-    if (!group || !data) return;
+    if (!group || !data || !requireModel()) return;
     await mutate('/api/messages', {
       id,
       groupId: group.id,
@@ -103,6 +125,7 @@ export default function App() {
     }
   }
   async function retryMessage(id: string, botId: string) {
+    if (!requireModel()) return;
     try {
       await mutate(`/api/messages/${id}/retry`, { botId });
     } catch (e) {
@@ -126,9 +149,7 @@ export default function App() {
             <span className="brand-logo">
               <BotIcon size={24} strokeWidth={2} />
             </span>
-            <strong>
-              OpenBot<span>beta</span>
-            </strong>
+            <strong>OpenBot</strong>
           </div>
           <button
             className="search-launch"
@@ -136,12 +157,12 @@ export default function App() {
             disabled={!data}
           >
             <Search size={15} />
-            <span>搜索任何内容</span>
+            <span>搜索</span>
             <Shortcut />
           </button>
           <div className="sidebar-section-head">
             <span>协作群组</span>
-            <IconButton label="创建群组" onPress={() => setModal({ type: 'group' })}>
+            <IconButton label="创建群组" onPress={() => createGroup()}>
               <Plus size={15} />
             </IconButton>
           </div>
@@ -165,7 +186,7 @@ export default function App() {
                 <span />
               </div>
             )}
-            <button className="new-group" onClick={() => setModal({ type: 'group' })}>
+            <button className="new-group" onClick={() => createGroup()}>
               <Plus size={15} />
               创建群组
             </button>
@@ -182,7 +203,7 @@ export default function App() {
               >
                 我的数字员工
               </button>
-              <IconButton label="创建 Bot" onPress={createBot}>
+              <IconButton label="创建数字员工" onPress={createBot}>
                 <Plus size={15} />
               </IconButton>
             </div>
@@ -197,7 +218,7 @@ export default function App() {
                   >
                     <BotAvatar bot={bot} size="small" />
                     <span>{bot.name}</span>
-                    <small>{bot.status === 'offline' ? '离线' : '在线'}</small>
+                    <small>{statusLabel[bot.status]}</small>
                   </button>
                 ))}
                 {data.bots.length > 4 && (
@@ -213,9 +234,9 @@ export default function App() {
                   <BotIcon size={19} />
                 </span>
                 <div>
-                  好同事，即将加入
+                  还没有数字员工
                   <small>
-                    创建你的第一位 Bot
+                    创建数字员工
                     <ArrowUpRight size={11} />
                   </small>
                 </div>
@@ -240,10 +261,10 @@ export default function App() {
                 <Terminal size={18} />
               </span>
               <div>
-                <strong>本地 Agent Bridge</strong>
+                <strong>本地执行</strong>
                 <small>
-                  <i className={data?.bridges?.length ? 'online' : ''} />
-                  {data?.bridges?.length ? '已连接' : '未连接'}
+                  <i className={connected && data?.bridges?.length ? 'online' : ''} />
+                  {!connected ? '状态待确认' : data?.bridges?.length ? '已连接' : '未连接'}
                 </small>
               </div>
               <ArrowUpRight size={14} />
@@ -280,12 +301,14 @@ export default function App() {
                     {group?.directBotId ? <MessageSquare size={19} /> : <Hash size={19} />}
                   </span>
                   <div>
-                    <h2>{group?.name ?? '你的工作空间'}</h2>
-                    <p>
-                      {directBot
-                        ? `单独聊天 · ${statusLabel[directBot.status]}`
-                        : (group?.description ?? '让每一个想法，都有同行者。')}
-                    </p>
+                    <h2>{group?.name ?? 'OpenBot'}</h2>
+                    {(directBot || group?.description) && (
+                      <p>
+                        {directBot
+                          ? `本地执行：${statusLabel[directBot.status]}`
+                          : group?.description}
+                      </p>
+                    )}
                   </div>
                 </>
               ) : (
@@ -303,13 +326,6 @@ export default function App() {
                     <h2>
                       {view === 'bots' ? '我的数字员工' : view === 'settings' ? '设置' : '活动记录'}
                     </h2>
-                    <p>
-                      {view === 'bots'
-                        ? '管理你的 Bot，随时开始聊天'
-                        : view === 'settings'
-                          ? '选择数字员工使用的对话模型'
-                          : '查看消息、任务与执行动态'}
-                    </p>
                   </div>
                 </>
               )}
@@ -344,14 +360,11 @@ export default function App() {
                     {overview ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
                   </IconButton>
                   {directBot ? (
-                    <IconButton label="查看 Agent 状态" onPress={() => showBridge(directBot)}>
+                    <IconButton label="查看执行状态" onPress={() => showBridge(directBot)}>
                       <Terminal size={19} />
                     </IconButton>
                   ) : (
-                    <IconButton
-                      label="群组设置"
-                      onPress={() => group && setModal({ type: 'group', group })}
-                    >
+                    <IconButton label="群组设置" onPress={() => group && createGroup(group)}>
                       <MoreHorizontal size={19} />
                     </IconButton>
                   )}
@@ -413,14 +426,33 @@ export default function App() {
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.13 }}
                     >
-                      {view === 'group' && group ? (
+                      {needsModelSetup && view !== 'settings' ? (
+                        <div className="workspace-empty model-setup-welcome">
+                          <span className="workspace-empty-icon">
+                            <Settings size={38} strokeWidth={1.4} />
+                          </span>
+                          <h1>先配置对话模型</h1>
+                          <p>
+                            数字员工需要对话模型才能理解消息和协作。配置完成后，即可创建数字员工、群组并开始聊天。
+                          </p>
+                          <ol className="model-setup-steps" aria-label="开始使用步骤">
+                            <li aria-current="step">配置对话模型</li>
+                            <li>创建数字员工</li>
+                            <li>开始聊天与协作</li>
+                          </ol>
+                          <Button className="accent-button" onPress={configureModel}>
+                            <Settings size={16} />
+                            配置对话模型
+                          </Button>
+                        </div>
+                      ) : view === 'group' && group ? (
                         <Timeline
                           key={`${connection.url}:${group.id}`}
                           draftScope={connection.url}
                           data={data}
                           group={group}
                           onBot={createBot}
-                          onMembers={() => setModal({ type: 'group', group })}
+                          onMembers={() => createGroup(group)}
                           onSend={send}
                           onRetryBot={retryMessage}
                           onUiAction={async (messageId, action) => {
@@ -437,25 +469,31 @@ export default function App() {
                           data={data}
                           onCreate={createBot}
                           onBridge={showBridge}
+                          onAvatar={(bot) => setModal({ type: 'avatar', botId: bot.id })}
                           onChat={(bot) => void openChat(bot)}
                         />
                       ) : view === 'activity' ? (
                         <ActivityView data={data} onGroup={selectGroup} />
                       ) : view === 'settings' ? (
-                        <SettingsView connection={connection} mutate={mutate} />
+                        <SettingsView
+                          connection={connection}
+                          mutate={mutate}
+                          setupRequired={needsModelSetup}
+                          onCreateBot={data.bots.length === 0 ? createBot : undefined}
+                        />
                       ) : (
                         <div className="workspace-empty">
                           <span className="workspace-empty-icon">
                             <BotIcon size={38} strokeWidth={1.4} />
                           </span>
-                          <h1>从一个想法开始</h1>
-                          <p>创建一位数字员工，或为一个目标组建群组。</p>
+                          <h1>开始使用 OpenBot</h1>
+                          <p>创建数字员工开始聊天，也可以创建群组。</p>
                           <div className="workspace-empty-actions">
                             <Button className="accent-button" onPress={createBot}>
                               <Plus size={16} />
                               创建数字员工
                             </Button>
-                            <Button variant="secondary" onPress={() => setModal({ type: 'group' })}>
+                            <Button variant="secondary" onPress={() => createGroup()}>
                               <Hash size={16} />
                               创建群组
                             </Button>
@@ -465,11 +503,11 @@ export default function App() {
                     </motion.div>
                   </AnimatePresence>
                 </div>
-                {view === 'group' && overview && group && (
+                {!needsModelSetup && view === 'group' && overview && group && (
                   <Overview
                     data={data}
                     group={group}
-                    onMembers={() => setModal({ type: 'group', group })}
+                    onMembers={() => createGroup(group)}
                     onBridge={showBridge}
                     onBot={createBot}
                     onStop={(id) => void stopChain(id)}
@@ -488,13 +526,9 @@ export default function App() {
                 <span className="disconnected-logo">
                   <BotIcon size={43} strokeWidth={1.4} />
                 </span>
-                <span className="eyebrow">YOUR NEXT CHAPTER STARTS HERE</span>
-                <h1>{status === 'connecting' ? '正在连接 OpenBot' : '让协作，重新连接'}</h1>
-                <p>
-                  OpenBot 会自动准备本地连接，无需额外设置。
-                  <br />
-                  你的消息与数字员工，将在连接后同步。
-                </p>
+
+                <h1>{status === 'connecting' ? '正在连接 OpenBot' : '无法连接本地服务'}</h1>
+                <p>请重试连接；若仍无法连接，请重新打开应用。</p>
                 <Button className="accent-button" onPress={retry}>
                   <ArrowUpRight size={16} />
                   重试连接
@@ -508,10 +542,6 @@ export default function App() {
               {connectionText}
             </button>
             <div>
-              <span>
-                <ShieldIcon />
-                本地优先
-              </span>
               <span>OpenBot Desktop</span>
             </div>
           </footer>
@@ -533,7 +563,7 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
-      {modal?.type === 'group' && (
+      {!needsModelSetup && data && modal?.type === 'group' && (
         <GroupDialog
           key={modal.group?.id ?? 'new'}
           group={modal.group}
@@ -547,10 +577,18 @@ export default function App() {
           mutate={mutate}
         />
       )}{' '}
-      {modal?.type === 'bot' && (
+      {!needsModelSetup && data && modal?.type === 'bot' && (
         <BotDialog data={data} onClose={() => setModal(null)} onSave={() => {}} mutate={mutate} />
       )}{' '}
-      {modal?.type === 'bridge' && (
+      {data && modal?.type === 'avatar' && data.bots.some((bot) => bot.id === modal.botId) && (
+        <BotAvatarDialog
+          key={modal.botId}
+          bot={data.bots.find((bot) => bot.id === modal.botId)!}
+          mutate={mutate}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {!needsModelSetup && data && modal?.type === 'bridge' && (
         <BridgeDialog
           bot={data?.bots.find((b) => b.id === modal.bot?.id)}
           data={data}
@@ -568,7 +606,4 @@ export default function App() {
       )}
     </div>
   );
-}
-function ShieldIcon() {
-  return <span className="tiny-shield">◇</span>;
 }

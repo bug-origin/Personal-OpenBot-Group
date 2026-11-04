@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './model-fixtures';
 test('create a bot and group, synchronize real messages, reply, search and preserve drafts', async ({
   page,
   context,
@@ -10,9 +10,9 @@ test('create a bot and group, synchronize real messages, reply, search and prese
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
   await expect(page.locator('.statusbar > button')).toContainText('协作服务已连接');
-  await page.getByRole('button', { name: '创建 Bot', exact: true }).click();
+  await page.getByRole('button', { name: '创建数字员工', exact: true }).first().click();
   const botDialog = page.getByRole('dialog');
-  await botDialog.getByLabel('Bot 名称').fill(botName);
+  await botDialog.getByLabel('数字员工名称').fill(botName);
   await botDialog.getByLabel('职责描述').fill('真实持久身份，等待本地 Bridge 接入');
   await botDialog.getByRole('button', { name: '创建数字员工', exact: true }).click();
   await expect(botDialog).not.toBeVisible();
@@ -40,7 +40,9 @@ test('create a bot and group, synchronize real messages, reply, search and prese
   await page.getByRole('button', { name: '回复消息', exact: true }).first().click();
   await input.fill('已收到，我们先准备上下文。');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
-  await expect(page.locator('.reply-preview')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '这是一条真实保存的协作消息', exact: true }),
+  ).toBeVisible();
   await input.fill('尚未发送的群组草稿');
   await page.getByRole('button', { name: '活动记录', exact: true }).click();
   await expect(page.getByRole('heading', { name: '活动记录', exact: true })).toBeVisible();
@@ -52,7 +54,10 @@ test('create a bot and group, synchronize real messages, reply, search and prese
     page.locator('.markdown').getByText('这是一条真实保存的协作消息', { exact: true }),
   ).toBeVisible();
   await page.keyboard.press('ControlOrMeta+k');
-  await page.getByRole('dialog').getByRole('textbox', { name: '搜索消息和 Bot' }).fill('真实保存');
+  await page
+    .getByRole('dialog')
+    .getByRole('textbox', { name: '搜索群组、数字员工和消息' })
+    .fill('真实保存');
   await expect(
     page
       .getByRole('dialog')

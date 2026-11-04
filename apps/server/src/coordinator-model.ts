@@ -79,7 +79,7 @@ export const coordinatorTools = [
   }),
   tool(
     'start_worker',
-    'Start asynchronous work using your own connected local capabilities. Returns immediately; reports and completion arrive as events. Continue the same task with continue_task/update_task. For a distinct next assignment within the same ongoing work context, pass its pipelineId from list_tasks; omit it for unrelated work to create a fresh pipeline. Never reuse a pipeline just because the directory or skill is similar. Use parentTaskId for a supporting subtask. All operations still use native host permissions.',
+    'Start asynchronous work using the human-selected execution tool for files, commands or web research. For news/current facts, specify the date range and require actual source links; search availability depends on the native tool and model service. Returns immediately; reports and completion arrive as events. Continue the same task with continue_task/update_task. For a distinct next assignment within the same ongoing work context, pass its pipelineId from list_tasks; omit it for unrelated work to create a fresh pipeline. Never reuse a pipeline just because the directory or skill is similar. Use parentTaskId for a supporting subtask. All operations still use native host permissions.',
     {
       goal: string,
       goalId: {

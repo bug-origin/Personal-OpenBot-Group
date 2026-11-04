@@ -18,45 +18,44 @@ export function conversationalText(content: string, tasks: Task[]) {
 
 export function workActivity(activity: string | null | undefined) {
   if (!activity) return '';
-  if (/等待所有者批准|等待.*审批/.test(activity)) return '需要你确认一下操作，我才能继续。';
-  if (/连接中断|结果未知/.test(activity)) return '本地连接断了，现在还无法确认处理结果。';
-  if (/续接|新要求/.test(activity)) return '正在按你补充的要求继续处理。';
-  if (/当前任务要求/.test(activity)) return '正在处理你交代的事情。';
-  if (/启动本地执行会话/.test(activity)) return '我在准备，马上看。';
-  if (/命令已结束/.test(activity))
-    return /退出码 [1-9]/.test(activity)
-      ? '刚才的一步操作没有成功，正在检查原因。'
-      : '刚做完一步操作，正在确认结果。';
-  if (/运行本地命令/.test(activity)) return '正在执行你交代的操作，还没结束。';
-  if (/文件变更|文件操作/.test(activity)) return '正在处理相关文件。';
-  if (/执行者正在处理任务/.test(activity)) return '我还在处理。';
-  if (/执行已完成/.test(activity)) return '处理好了。';
-  if (/执行已停止/.test(activity)) return '已经停下来了。';
-  if (/执行失败/.test(activity)) return '遇到了一点问题，还没完成。';
+  if (/等待所有者批准|等待.*审批/.test(activity)) return '等待你授权操作。';
+  if (/连接(?:已)?中断|结果未知/.test(activity))
+    return '连接已中断，执行结果尚未确认，未自动重试。';
+  if (/续接|新要求/.test(activity)) return '正在按新要求继续执行。';
+  if (/当前任务要求/.test(activity)) return '正在执行任务。';
+  if (/启动本地执行会话/.test(activity)) return '正在准备执行。';
+  if (/命令已结束/.test(activity)) {
+    const exitCode = activity.match(/退出码\s*(-?\d+)/)?.[1];
+    return exitCode && Number(exitCode) !== 0 ? '命令执行失败。' : '命令执行结束。';
+  }
+  if (/运行本地命令/.test(activity)) return '正在运行命令。';
+  if (/文件变更|文件操作/.test(activity)) return '正在处理文件。';
+  if (/执行者正在处理任务/.test(activity)) return '正在执行任务。';
+  if (/执行已完成/.test(activity)) return '执行已结束。';
+  if (/执行已停止/.test(activity)) return '执行已停止。';
+  if (/执行失败/.test(activity)) return '执行失败，尚未完成。';
   return activity;
 }
 
 export function workProgress(task: Task) {
   const e = task.execution;
   let text: string;
-  if (e?.pendingChange?.status === 'interrupted')
-    text = '刚才中断了，还没能按你补充的要求继续，需要先确认一下情况。';
-  else if (e?.pendingChange) text = '收到你的调整了，正在停下手头的操作，确认后再按新要求继续。';
-  else if (task.status === 'queued') text = '这件事还没开始，我会接着处理。';
-  else if (task.status === 'cancelling') text = '正在停下手头的操作，停稳后告诉你。';
-  else if (task.status === 'cancelled') text = '已经停下来了。';
-  else if (task.status === 'reviewing') text = '执行结果已返回，我正在检查是否满足要求。';
+  if (e?.pendingChange?.status === 'interrupted') text = '变更处理已中断，尚未按新要求继续。';
+  else if (e?.pendingChange) text = '正在停止当前执行，之后按新要求继续。';
+  else if (task.status === 'queued') text = '任务正在等待执行。';
+  else if (task.status === 'cancelling') text = '正在停止执行。';
+  else if (task.status === 'cancelled') text = '执行已停止。';
+  else if (task.status === 'reviewing') text = '执行结果已返回，等待验收。';
   else if (task.status === 'failed')
-    text = `这边遇到了问题，还没完成。${task.error ? `\n${task.error}` : ''}`;
-  else if (task.status === 'completed')
-    text = task.result?.trim() ? task.result : '已经处理完了，没有更多结果需要补充。';
+    text = `执行失败，尚未完成。${task.error ? `\n${task.error}` : ''}`;
+  else if (task.status === 'completed') text = task.result?.trim() ? task.result : '已完成。';
   else {
     const report = e?.report?.trim();
     const activity = workActivity(e?.activity);
     text =
       [report, activity && !report?.includes(activity) ? activity : '']
         .filter(Boolean)
-        .join('\n') || '我还在处理，暂时没有新的进展。';
+        .join('\n') || '正在执行，暂无新进展。';
   }
   return conversationalText(text, [task]);
 }

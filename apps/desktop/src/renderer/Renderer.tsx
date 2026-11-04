@@ -82,7 +82,7 @@ export function Renderer(props: RendererProps) {
     </RenderBoundary>
   ) : (
     <div role="alert" className="callout danger">
-      这张卡片暂时无法展示，请让伙伴重新发一张。
+      无法显示卡片，请让数字员工重新发送。
     </div>
   );
 }
@@ -176,7 +176,7 @@ function RenderSession({
       )
         return;
       if (!onAction) {
-        setNotice('此示例的操作已完成，仅更新本地预览。');
+        setNotice('预览模式，操作不会提交。');
         return;
       }
       inFlight.current = true;
@@ -1028,7 +1028,7 @@ function RenderSession({
       )}
       {disabled && (
         <small className="muted">
-          <Check size={12} /> {readOnlyNote ?? '已提交 · 历史内容'}
+          <Check size={12} /> {readOnlyNote ?? '已提交'}
         </small>
       )}
     </div>
@@ -1346,7 +1346,7 @@ class RenderBoundary extends Component<{ children: ReactNode }, { error: string 
   render() {
     return this.state.error ? (
       <div role="alert" className="callout danger">
-        这张卡片暂时无法展示，请让伙伴重新发一张。
+        无法显示卡片，请让数字员工重新发送。
       </div>
     ) : (
       this.props.children

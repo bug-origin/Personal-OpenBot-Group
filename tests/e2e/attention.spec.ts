@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../../apps/server/src/app';
+import { testModelConfig } from './model-fixtures';
 
 test('keeps irrelevant Bots silent and retries attention failures beneath the source Bot message', async ({
   page,
@@ -18,6 +19,7 @@ test('keeps irrelevant Bots silent and retries attention failures beneath the so
     databasePath: join(directory, 'db.sqlite'),
     token,
     clientOrigin: 'http://127.0.0.1:1421',
+    modelConfig: testModelConfig,
     attention: async (i) => {
       if (i.message.content === '先不讨论') return { wake: false };
       if (i.message.actor.type === 'human') return { wake: i.bot.name === 'BB' };
@@ -77,7 +79,7 @@ test('keeps irrelevant Bots silent and retries attention failures beneath the so
     await composer.fill('BB继续吧');
     await page.getByRole('button', { name: '发送消息', exact: true }).click();
     await expect(page.getByRole('button', { name: '重试 DEV', exact: true })).toBeVisible();
-    await expect(page.locator('.dialogue-retry-row')).toContainText('注意力判断失败');
+    await expect(page.locator('.dialogue-retry-row')).toContainText('群消息判断失败');
     expect(devCalls).toBe(0);
     expect(instance.store.snapshot().tasks).toHaveLength(0);
     await page.screenshot({ path: testInfo.outputPath('attention-retry.png') });

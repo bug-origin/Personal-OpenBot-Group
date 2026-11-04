@@ -57,22 +57,65 @@ export const nativeReplySchema = z
   })
   .strict();
 export const groupSchema = z.object({
-  name: z.string().trim().min(1).max(48),
-  description: z.string().trim().max(240).default(''),
+  name: z.string().trim().min(1, '请填写群组名称').max(48, '群组名称不能超过 48 个字符'),
+  description: z.string().trim().max(240, '群组描述不能超过 240 个字符').default(''),
   botIds: z.array(z.string()).max(32).default([]),
 });
+export const botAvatarSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('emoji'),
+      value: z
+        .string()
+        .trim()
+        .min(1)
+        .max(32)
+        .refine(
+          (value) =>
+            Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value))
+              .length === 1 &&
+            /\p{Extended_Pictographic}|\p{Regional_Indicator}|[\d#*]\uFE0F?\u20E3/u.test(value),
+          '请选择或输入一个 emoji',
+        ),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('image'),
+      value: z
+        .string()
+        .max(90000, '头像图片过大，请重新上传')
+        .refine((value) => {
+          const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+          if (!match) return false;
+          try {
+            const bytes = atob(match[2]);
+            if (match[1] === 'jpeg') return bytes.startsWith('\xff\xd8\xff');
+            if (match[1] === 'png') return bytes.startsWith('\x89PNG\r\n\x1a\n');
+            return bytes.startsWith('RIFF') && bytes.slice(8, 12) === 'WEBP';
+          } catch {
+            return false;
+          }
+        }, '请上传 JPG、PNG 或 WebP 图片'),
+    })
+    .strict(),
+]);
+export const botAvatarUpdateSchema = z.object({ avatar: botAvatarSchema.nullable() }).strict();
 export const botSchema = z.object({
   name: z
     .string()
     .trim()
+    .min(1, '请填写数字员工名称')
+    .max(32, '数字员工名称不能超过 32 个字符')
     .regex(/^[\p{L}\p{N}_-]{1,32}$/u, '名称仅支持文字、数字、下划线和连字符'),
-  description: z.string().trim().max(240).default(''),
+  description: z.string().trim().max(240, '职责描述不能超过 240 个字符').default(''),
   provider: z.enum(['claude-code', 'codex']),
+  avatar: botAvatarSchema.nullable().default(null),
 });
 export const messageSchema = z.object({
   id: z.string().uuid(),
   groupId: z.string(),
-  content: z.string().trim().min(1).max(16000),
+  content: z.string().trim().min(1, '消息不能为空').max(16000, '消息不能超过 16000 个字符'),
   mentions: z.array(z.string()).max(32).default([]),
   replyTo: z.string().nullable().default(null),
 });

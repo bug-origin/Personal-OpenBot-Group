@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../../apps/server/src/app';
+import { testModelConfig } from './model-fixtures';
 
 test('deletes a group from its top-right settings after confirmation and preserves its Bots', async ({
   page,
@@ -16,6 +17,9 @@ test('deletes a group from its top-right settings after confirmation and preserv
     databasePath: join(directory, 'db.sqlite'),
     token,
     clientOrigin: 'http://127.0.0.1:1421',
+    modelConfig: testModelConfig,
+    coordinator: async () => ({ role: 'assistant', content: '' }),
+    attention: async () => ({ wake: false }),
   });
   const api = async (url: string, payload: unknown) => {
     const r = await instance.app.inject({
@@ -74,7 +78,9 @@ test('deletes a group from its top-right settings after confirmation and preserv
     await page.getByRole('button', { name: '群组设置', exact: true }).click();
     await dialog.getByRole('button', { name: '删除群组', exact: true }).click();
     await dialog.getByRole('button', { name: '确认删除', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '从一个想法开始', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: '开始使用 OpenBot', exact: true }),
+    ).toBeVisible();
     expect(instance.store.snapshot().bots).toHaveLength(1);
     expect(errors).toEqual([]);
   } finally {

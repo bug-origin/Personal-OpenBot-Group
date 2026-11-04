@@ -25,8 +25,8 @@ export async function discoverProviders(env: NodeJS.ProcessEnv = process.env) {
           available: false,
           reason:
             provider === 'codex'
-              ? '请安装 Codex CLI 并运行 codex login'
-              : '请安装 Claude Code 并运行 claude auth login',
+              ? '本机需安装 Codex CLI，并完成账号登录'
+              : '本机需安装 Claude Code，并完成账号登录',
         };
       if (provider === 'codex')
         return {
@@ -66,7 +66,7 @@ export async function discoverProviders(env: NodeJS.ProcessEnv = process.env) {
         available: authenticated,
         ...(!authenticated
           ? {
-              reason: '请运行 claude auth login 完成本地登录',
+              reason: 'Claude Code 尚未完成本机账号登录',
             }
           : {}),
       };

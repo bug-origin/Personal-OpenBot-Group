@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../../apps/server/src/app';
 import type { AgentJob, BridgeCommand } from '@openbot/shared';
+import { executionModel, testModelConfig } from './model-fixtures';
 
 test('native questions and permissions round-trip inside the group without spawning a new execution', async ({
   page,
@@ -16,6 +17,9 @@ test('native questions and permissions round-trip inside the group without spawn
     databasePath: join(directory, 'db.sqlite'),
     token,
     clientOrigin: 'http://127.0.0.1:1421',
+    modelConfig: testModelConfig,
+    coordinator: executionModel,
+    attention: async () => ({ wake: false }),
   });
   await instance.app.listen({ host: '127.0.0.1', port: 0 });
   const address = instance.app.server.address() as { port: number };
@@ -50,11 +54,11 @@ test('native questions and permissions round-trip inside the group without spawn
       { url, token },
     );
     await page.goto('/');
-    await page.getByRole('button', { name: '创建 Bot', exact: true }).click();
+    await page.getByRole('button', { name: '创建数字员工', exact: true }).first().click();
     const creation = page.getByRole('dialog');
-    await creation.getByLabel('Bot 名称').fill('NativeBob');
+    await creation.getByLabel('数字员工名称').fill('NativeBob');
     await expect(creation.getByText(/创建后自动连接/)).toBeVisible();
-    await expect(creation.getByRole('combobox')).toHaveCount(0);
+    await expect(creation.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
     await page.screenshot({
       path: testInfo.outputPath('device-binding.png'),
       fullPage: true,
@@ -71,12 +75,12 @@ test('native questions and permissions round-trip inside the group without spawn
       has: page.getByRole('heading', { name: 'NativeBob', exact: true }),
     });
     await expect(profile.locator('.status-label')).toHaveClass(/idle/);
-    await profile.getByRole('button', { name: '查看 Agent 状态' }).click();
+    await profile.getByRole('button', { name: '查看执行状态' }).click();
     const binding = page.getByRole('dialog');
     await expect(binding.getByRole('textbox')).toHaveCount(0);
-    await expect(binding.getByRole('combobox')).toHaveCount(0);
+    await expect(binding.getByLabel('执行工具')).toHaveValue('codex');
     await expect(binding.getByRole('button', { name: /绑定|切换运行设备/ })).toHaveCount(0);
-    await binding.getByRole('button', { name: '了解了', exact: true }).click();
+    await binding.getByRole('button', { name: '取消', exact: true }).click();
     await expect(binding).not.toBeVisible();
     await api('/api/messages', {
       id: randomUUID(),
@@ -111,13 +115,13 @@ test('native questions and permissions round-trip inside the group without spawn
       ],
     });
     await page.getByRole('button', { name: '原生交互验证', exact: true }).click();
-    const card = page.getByRole('region', { name: 'Agent 原生提问' });
+    const card = page.getByRole('region', { name: '执行提问' });
     await expect(card.getByText('这次先看哪部分？')).toBeVisible();
     await page.reload();
     await card.getByRole('radio', { name: /安全/ }).check();
     await card.getByRole('textbox', { name: '有什么需要特别留意？' }).fill('检查缓存清理');
     await card.getByRole('button', { name: '提交回答', exact: true }).click();
-    await expect(card.getByRole('status')).toContainText('已提交');
+    await expect(card.getByRole('status')).toContainText('已回答');
     await expect(card.getByRole('textbox', { name: '有什么需要特别留意？' })).toHaveValue(
       '检查缓存清理',
     );
@@ -137,7 +141,7 @@ test('native questions and permissions round-trip inside the group without spawn
       command: 'printf native-check',
       cwd: directory,
     });
-    const permission = page.getByRole('region', { name: 'Agent 原生权限请求' });
+    const permission = page.getByRole('region', { name: '操作授权' });
     await expect(permission.getByText('printf native-check', { exact: true })).toBeVisible();
     await permission.getByRole('button', { name: '拒绝', exact: true }).click();
     await expect(permission.getByRole('status')).toContainText('拒绝');
@@ -169,7 +173,7 @@ test('native questions and permissions round-trip inside the group without spawn
         },
       ],
     });
-    const multiple = page.getByRole('region', { name: 'Agent 原生提问' }).last();
+    const multiple = page.getByRole('region', { name: '执行提问' }).last();
     await multiple.getByRole('textbox', { name: '选择需要检查的部分（其他回答）' }).fill('缓存');
     await multiple.getByRole('checkbox', { name: /安全/ }).check();
     await multiple.getByLabel('临时验证口令', { exact: true }).fill('temporary-native-check');
@@ -179,7 +183,7 @@ test('native questions and permissions round-trip inside the group without spawn
       animations: 'disabled',
     });
     await multiple.getByRole('button', { name: '提交回答', exact: true }).click();
-    await expect(multiple.getByRole('status')).toContainText('已提交');
+    await expect(multiple.getByRole('status')).toContainText('已回答');
     expect(commands.filter((c) => c.type === 'native_reply').at(-1)).toMatchObject({
       requestId: 'multiple',
       response: {
@@ -200,9 +204,9 @@ test('native questions and permissions round-trip inside the group without spawn
       details: { permissions: { fileSystem: { read: ['/example/project'] } } },
       allowSession: true,
     });
-    const grant = page.getByRole('region', { name: 'Agent 原生权限请求' }).last();
+    const grant = page.getByRole('region', { name: '操作授权' }).last();
     await grant.getByRole('button', { name: '本次会话允许', exact: true }).click();
-    await expect(grant.getByRole('status')).toContainText('已提交');
+    await expect(grant.getByRole('status')).toContainText('已允许本次会话');
     expect(commands.filter((c) => c.type === 'native_reply').at(-1)).toMatchObject({
       requestId: 'permission',
       response: { decision: 'accept', scope: 'session' },
@@ -213,11 +217,11 @@ test('native questions and permissions round-trip inside the group without spawn
       details: { permissions: { fileSystem: { read: ['/example/project'] } } },
       allowSession: true,
     });
-    const last = page.getByRole('region', { name: 'Agent 原生权限请求' }).last();
-    await expect(last.getByRole('button', { name: '允许', exact: true })).toBeVisible();
+    const last = page.getByRole('region', { name: '操作授权' }).last();
+    await expect(last.getByRole('button', { name: '允许本次', exact: true })).toBeVisible();
     await api(`/api/chains/${job.task.correlationId}/stop`, {});
     await expect(last.getByRole('status')).toContainText('失效');
-    await expect(last.getByRole('button', { name: '允许', exact: true })).toHaveCount(0);
+    await expect(last.getByRole('button', { name: '允许本次', exact: true })).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
     await page.screenshot({

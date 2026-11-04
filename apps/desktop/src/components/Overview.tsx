@@ -4,12 +4,12 @@ import type { Bot, Group, Snapshot, Task, WorkGoal, WorkArtifact } from '@openbo
 import { workActivity, conversationalText } from '@openbot/shared';
 import { BotAvatar, EmptySmall, IconButton, Status } from './Primitives';
 export const taskLabels: Record<Task['status'], string> = {
-  queued: '稍后处理',
-  running: '处理中',
+  queued: '等待执行',
+  running: '执行中',
   cancelling: '正在停止',
   completed: '已完成',
-  reviewing: '正在检查',
-  failed: '遇到问题',
+  reviewing: '待验收',
+  failed: '执行失败',
   cancelled: '已停止',
 };
 export function GoalCard({
@@ -22,17 +22,17 @@ export function GoalCard({
   artifacts?: WorkArtifact[];
 }) {
   const states = {
-    active: '持续负责',
-    waiting: '等待条件',
-    needs_attention: '需要你决定',
+    active: '进行中',
+    waiting: '等待中',
+    needs_attention: goal.ownerWait ? '需要你决定' : '需要关注',
     completed: '目标已完成',
     cancelled: '目标已停止',
   };
   const stages = {
-    produced: '产物已登记',
-    verified: '验证已记录',
-    accepted: '负责人已接受',
-    applied: '已应用到项目',
+    produced: '待验证',
+    verified: '待验收',
+    accepted: '已验收',
+    applied: '已应用',
   };
   return (
     <div className={`task-card goal-card ${goal.state}`}>
@@ -61,7 +61,7 @@ export function GoalCard({
             {goal.attentionReason}
           </p>
         )}
-        {goal.delivery === 'applied' && <p>完成要求：交付内容已应用到目标项目</p>}
+        {goal.delivery === 'applied' && <p>完成条件：应用到目标项目</p>}
         {artifacts
           .filter((a) => a.goalId === goal.id)
           .map((a) => (
@@ -85,7 +85,9 @@ export function TaskCard({
   return (
     <div className={`task-card ${task.status}`}>
       <div>
-        <span className={`task-state ${task.status}`}>{taskLabels[task.status]}</span>
+        <span className={`task-state ${task.status}`}>
+          {task.execution?.health?.state === 'unknown' ? '结果待确认' : taskLabels[task.status]}
+        </span>
         <time>
           {new Date(task.createdAt).toLocaleTimeString('zh-CN', {
             hour: '2-digit',
@@ -96,7 +98,7 @@ export function TaskCard({
       <p>{task.input}</p>
       <small>
         <BotIcon size={12} />
-        {bot?.name ?? 'Agent'}
+        {bot?.name ?? '数字员工'}
       </small>
       {task.execution && (
         <div className="task-progress">
@@ -110,7 +112,7 @@ export function TaskCard({
           {task.execution.contract?.nextWakeAt && (
             <p>下次检查：{new Date(task.execution.contract.nextWakeAt).toLocaleString('zh-CN')}</p>
           )}
-          {task.execution.workspace && <p>改动保存在独立工作副本，尚未合入原项目。</p>}
+          {task.execution.workspace && <p>改动保存在独立工作副本。</p>}
           {task.execution.activity && <p>{workActivity(task.execution.activity)}</p>}
           {task.execution.report && <p>{conversationalText(task.execution.report, [task])}</p>}
           {task.execution.health &&
@@ -139,8 +141,8 @@ export function TaskCard({
           {task.execution.pendingChange && (
             <p className="task-error">
               {task.execution.pendingChange.status === 'interrupted'
-                ? '刚才中断了，还没能按你补充的要求继续。'
-                : '正在停下手头的操作，确认后按你的新要求继续。'}
+                ? '变更处理已中断，尚未按新要求继续。'
+                : '正在停止当前执行，之后按新要求继续。'}
             </p>
           )}
           <small>更新于 {new Date(task.execution.updatedAt).toLocaleTimeString('zh-CN')}</small>
@@ -150,7 +152,7 @@ export function TaskCard({
       {task.result && <p>{conversationalText(task.result, [task])}</p>}
       {onStop && ['queued', 'running', 'reviewing'].includes(task.status) && (
         <Button variant="danger-soft" size="sm" onPress={() => onStop(task.correlationId)}>
-          停止处理
+          停止本轮工作
         </Button>
       )}
     </div>
@@ -182,19 +184,19 @@ export function Overview({
       t.status === 'cancelling' ||
       t.status === 'reviewing',
   );
+  const goals =
+    data.goals?.filter(
+      (g) => !g.legacy && g.groupId === group.id && !['completed', 'cancelled'].includes(g.state),
+    ) ?? [];
   return (
     <aside className="overview">
       <div className="overview-heading">
         <span>协作概览</span>
-        <span className="live-label">
-          <i />
-          LIVE
-        </span>
       </div>
       <section className="overview-section">
         <div className="section-title">
           <h3>
-            {group.directBotId ? '当前对话' : '一起工作'} <span>{bots.length + 1}</span>
+            {group.directBotId ? '当前对话' : '成员'} <span>{bots.length + 1}</span>
           </h3>
           {!group.directBotId && (
             <IconButton label="管理群组成员" onPress={onMembers}>
@@ -205,23 +207,16 @@ export function Overview({
         <div className="member human-member">
           <span className="human-avatar">我</span>
           <div>
-            <strong>
-              {data.user.name}
-              <span>你</span>
-            </strong>
-            <small>Bot 所有者</small>
+            <strong>{data.user.name}</strong>
+            <small>所有者</small>
           </div>
-          <span className="member-online" title="已连接" />
         </div>
         {bots.map((bot) => (
           <button key={bot.id} className="member bot-member" onClick={() => onBridge(bot)}>
             <BotAvatar bot={bot} />
             <div>
-              <strong>
-                {bot.name}
-                <span>BOT</span>
-              </strong>
-              <small>本地执行能力</small>
+              <strong>{bot.name}</strong>
+              {bot.description && <small>{bot.description}</small>}
             </div>
             <Status status={bot.status} />
           </button>
@@ -229,7 +224,7 @@ export function Overview({
         {!group.directBotId && (
           <button className="invite-bot" onClick={bots.length ? onMembers : onBot}>
             <Plus size={15} />
-            {bots.length ? '管理数字员工' : '添加一位数字同事'}
+            {bots.length ? '管理成员' : '添加数字员工'}
             <ArrowUpRight size={14} />
           </button>
         )}
@@ -237,23 +232,18 @@ export function Overview({
       <section className="overview-section">
         <div className="section-title">
           <h3>
-            正在处理 <span>{active.length}</span>
+            当前工作 <span>{active.length + goals.length}</span>
           </h3>
           <ListTodo size={15} />
         </div>
-        {data.goals
-          ?.filter(
-            (g) =>
-              !g.legacy && g.groupId === group.id && !['completed', 'cancelled'].includes(g.state),
-          )
-          .map((g) => (
-            <GoalCard
-              key={g.id}
-              goal={g}
-              bot={bots.find((b) => b.id === g.botId)}
-              artifacts={data.artifacts}
-            />
-          ))}
+        {goals.map((g) => (
+          <GoalCard
+            key={g.id}
+            goal={g}
+            bot={bots.find((b) => b.id === g.botId)}
+            artifacts={data.artifacts}
+          />
+        ))}
         {active.length ? (
           active.map((t) => (
             <TaskCard
@@ -263,19 +253,19 @@ export function Overview({
               onStop={onStop}
             />
           ))
-        ) : (
+        ) : !goals.length ? (
           <EmptySmall
             icon={<ListTodo size={21} />}
-            title="一切从容，等待下一步"
-            description="有新的进展，会显示在这里。"
+            title="暂无进行中的工作"
+            description="目标和任务进展会显示在这里。"
           />
-        )}
+        ) : null}
       </section>
       {data.approvals
         ?.filter((a) => a.status === 'pending' && tasks.some((t) => t.id === a.taskId))
         .map((a) => (
           <section className="overview-section approval-card" key={a.id}>
-            <strong>需要所有者审批</strong>
+            <strong>需要你授权</strong>
             <p>{a.kind === 'command' ? '执行命令' : '修改文件'}</p>
             {a.detail.command && <pre>{a.detail.command}</pre>}
             {a.detail.cwd && <small>{a.detail.cwd}</small>}

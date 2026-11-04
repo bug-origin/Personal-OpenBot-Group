@@ -1,7 +1,8 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './model-fixtures';
 
 test('dynamic cards validate input, preserve drafts, submit once and render under the existing conversation layout', async ({
   page,
+  workspace,
 }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -11,7 +12,7 @@ test('dynamic cards validate input, preserve drafts, submit once and render unde
   await page.goto('/');
   const headers = { authorization: (await auth).headers().authorization };
   const api = async (path: string, body: unknown) => {
-    const response = await page.request.post('http://127.0.0.1:4311' + path, {
+    const response = await page.request.post(workspace.url + path, {
       headers,
       data: body,
     });

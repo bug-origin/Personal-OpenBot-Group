@@ -634,7 +634,7 @@ it('limits repeated autonomous execution even when the model keeps reworking the
   expect(calls.at(-1)!.result).toContain('执行预算');
 });
 
-it('uses the available execution tool even when the preferred tool is offline', async () => {
+it('queues for the selected tool instead of substituting another available provider', async () => {
   await setup(async (messages) =>
     messages.at(-1)?.role === 'tool' ? reply() : call('start_worker', { goal: '读取验证' }),
   );
@@ -650,13 +650,63 @@ it('uses the available execution tool even when the preferred tool is offline', 
   );
   const b = await bot();
   expect(instance!.store.snapshot().bots.find((x) => x.id === b)).toMatchObject({
-    status: 'idle',
+    status: 'offline',
     provider: 'codex',
-    bridgeId: 'device',
+    bridgeId: null,
   });
   await message(await group([b]), '处理');
   await idle();
+  expect(jobs()).toHaveLength(0);
+  expect(instance!.store.snapshot().tasks[0]).toMatchObject({
+    status: 'queued',
+    execution: { provider: 'codex' },
+  });
+  instance!.runtime.detach('device');
+  instance!.runtime.attach(
+    {
+      id: 'device',
+      name: 'Codex online',
+      providers: [{ provider: 'codex', available: true, version: 'test' }],
+    },
+    (command) => commands.push(command),
+    () => instance?.runtime.detach('device'),
+  );
+  await expect.poll(() => jobs().length).toBe(1);
+  expect(jobs()[0].bot.provider).toBe('codex');
+});
+
+it('uses a saved Claude selection on a dual-provider device and supplies web research context', async () => {
+  await setup(async (messages) => {
+    const data = input(messages);
+    expect(data.bot.executionTool).toBe('claude-code');
+    expect(data.capabilities.join(' ')).toContain('联网搜索');
+    expect(Number.isNaN(Date.parse(data.clock.now))).toBe(false);
+    expect(data.clock.timeZone).toBeTruthy();
+    expect(messages[0].content).toContain('do not ask the human to download news first');
+    if (messages.at(-1)?.role === 'tool') return reply();
+    return call('start_worker', {
+      goal: '检索昨天的新闻，核实发布日期并附原文链接',
+      resourceMode: 'read',
+    });
+  });
+  const b = await bot();
+  expect(
+    (
+      await api('PATCH', `/api/bots/${b}/execution`, {
+        provider: 'claude-code',
+        bridgeId: 'device',
+      })
+    ).statusCode,
+  ).toBe(200);
+  await message(await group([b]), '昨天有哪些新闻？');
+  await idle();
+  await expect.poll(() => jobs().length).toBe(1);
   expect(jobs()[0].bot.provider).toBe('claude-code');
+  expect(jobs()[0].task.execution?.provider).toBe('claude-code');
+  expect((await api('PATCH', `/api/bots/${b}/execution`, { provider: 'codex' })).statusCode).toBe(
+    409,
+  );
+  expect(instance!.store.snapshot().bots[0].provider).toBe('claude-code');
 });
 
 it('gives each Bot shared sourced memory and a cross-conversation membership/task overview', async () => {
@@ -685,8 +735,8 @@ it('gives each Bot shared sourced memory and a cross-conversation membership/tas
   expect(context.memberships.map((membership: { name: string }) => membership.name)).toContain(
     '项目群',
   );
-  expect(JSON.stringify(context)).not.toContain('codex');
-  expect(JSON.stringify(context)).not.toContain('claude');
+  expect(context.bot.executionTool).toBe('codex');
+  expect(context).not.toHaveProperty('credentials');
 });
 
 it('uses official function calling with bounded output, no hidden provider credentials and no JSON-mode conflict', async () => {

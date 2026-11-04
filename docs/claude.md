@@ -20,7 +20,7 @@
 
 ## 当前工具范围
 
-默认允许 Read、Glob、Grep；同时暴露 Bash、Edit、Write 和 AskUserQuestion。使用 restricted、safe-mode、空 MCP 配置与 manual 权限模式，写入及命令工具通过 `can_use_tool` 原生请求逐项交给群内所有者审批，未收到明确允许前不执行。原生子 Agent、外部 MCP、用户插件和项目 hooks 不开放。
+默认允许 Read、Glob、Grep、WebSearch；同时暴露 WebFetch、Bash、Edit、Write 和 AskUserQuestion。只读任务也开放 WebSearch / WebFetch，不开放写入与命令工具。使用 restricted、safe-mode、空 MCP 配置与 manual 权限模式，网页读取、写入及命令工具通过 `can_use_tool` 原生请求逐项交给群内所有者审批，未收到明确允许前不执行。联网工具仍受原生服务、账号策略和网络限制，不能把启动参数当作联网成功的证明。原生子 Agent、外部 MCP、用户插件和项目 hooks 不开放。
 
 AskUserQuestion 保留原问题、选项和多选能力；回答转回同一 Claude 进程的 `control_response`，按原问题填写 `updatedInput.answers`。工具授权只使用 Bridge 保存的原始工具输入，客户端不能替换文件路径、命令或写入内容。拒绝返回 deny；原生取消请求、停止或断线使卡片失效。不会把人类回答转换成新群消息或另开执行。
 

@@ -34,6 +34,7 @@ export interface Group {
   createdAt: string;
   directBotId?: string;
 }
+export type BotAvatarSpec = { type: 'emoji' | 'image'; value: string };
 export interface Bot {
   id: string;
   ownerId: string;
@@ -43,6 +44,7 @@ export interface Bot {
   status: BotStatus;
   bridgeId: string | null;
   createdAt: string;
+  avatar?: BotAvatarSpec | null;
 }
 export interface Message {
   id: string;
@@ -181,11 +183,11 @@ export const providerLabel: Record<Provider, string> = {
   codex: 'Codex',
 };
 export const statusLabel: Record<BotStatus, string> = {
-  offline: '离线',
+  offline: '未连接',
   idle: '待命',
   thinking: '思考中',
   working: '执行中',
-  error: '异常',
+  error: '执行异常',
 };
 export function resolveMentions(content: string, bots: Pick<Bot, 'id' | 'name'>[]): string[] {
   const names = new Set(

@@ -78,11 +78,13 @@ export function claudeRequest(
           ? 'file'
           : 'tool',
     title:
-      tool === 'Bash'
-        ? '需要你允许运行命令'
-        : ['Edit', 'Write', 'NotebookEdit'].includes(tool)
-          ? '需要你允许修改文件'
-          : `需要你允许使用 ${tool}`,
+      tool === 'WebFetch'
+        ? '需要你允许读取网页'
+        : tool === 'Bash'
+          ? '需要你允许运行命令'
+          : ['Edit', 'Write', 'NotebookEdit'].includes(tool)
+            ? '需要你允许修改文件'
+            : `需要你允许使用 ${tool}`,
     ...(reason ? { reason } : {}),
     ...(typeof input.command === 'string' ? { command: input.command } : {}),
     details: { tool, input },

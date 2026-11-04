@@ -18,6 +18,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Bot, Group, Message, Snapshot, NativeReply } from '@openbot/shared';
+import { statusLabel } from '@openbot/shared';
 import { NativeInteraction } from './NativeInteraction';
 import type { ActionEnvelope } from '@openbot/shared/ui/types';
 import { BotAvatar, IconButton } from './Primitives';
@@ -45,15 +46,9 @@ export function Welcome({
         <div className="welcome-bot">
           <BotIcon size={39} strokeWidth={1.5} />
         </div>
-        <span className="eyebrow">ONE TO ONE</span>
-        <h1>
-          和 {group.name} 聊聊<span>。</span>
-        </h1>
-        <p className="welcome-copy">
-          无需 @，直接发送消息即可。
-          <br />
-          这里的聊天记录与群组对话分开保存。
-        </p>
+
+        <h1>与 {group.name} 聊天</h1>
+        <p className="welcome-copy">直接发送消息即可。</p>
         <Button className="accent-button" onPress={onCompose}>
           <MessageSquare size={17} />
           开始聊天
@@ -77,50 +72,36 @@ export function Welcome({
         </div>
         <span className="orbit-dot" />
       </div>
-      <span className="eyebrow">HUMAN IDEAS. AGENT POSSIBILITIES.</span>
-      <h1>
-        让好想法，
-        <br />
-        发生在一起<span>。</span>
-      </h1>
+
+      <h1>开始群聊</h1>
       <p className="welcome-copy">
-        欢迎来到「{group.name}」。
-        <br />
-        把伙伴和数字员工聚在一起，从一个想法开始协作。
+        {hasBots ? '发送消息开始讨论，输入 @ 可指定数字员工。' : '先添加数字员工，再开始讨论。'}
       </p>
       <div className="start-cards">
         <button onClick={onBot}>
-          <span className="step-number">01</span>
           <span className="step-icon peach">
             <BotIcon size={20} />
           </span>
-          <strong>认识新同事</strong>
-          <p>创建你的第一个数字员工</p>
+          <strong>创建数字员工</strong>
+
           <span className="step-arrow">↗</span>
         </button>
         <button onClick={onMembers}>
-          <span className="step-number">02</span>
           <span className="step-icon lavender">
             <Users size={20} />
           </span>
-          <strong>组建协作小队</strong>
-          <p>{hasBots ? '管理群组中的 Agent' : '邀请 Bot，加入这个群组'}</p>
+          <strong>管理成员</strong>
+
           <span className="step-arrow">↗</span>
         </button>
         <button onClick={onCompose}>
-          <span className="step-number">03</span>
           <span className="step-icon green">
             <MessageSquare size={20} />
           </span>
-          <strong>开启第一段对话</strong>
-          <p>分享想法，让协作自然发生</p>
+          <strong>开始聊天</strong>
+
           <span className="step-arrow">↗</span>
         </button>
-      </div>
-      <div className="welcome-foot">
-        <span />
-        一个空间，人类与 AI 的共同主场
-        <span />
       </div>
     </motion.div>
   );
@@ -208,7 +189,7 @@ function MessageItem({
       <div className="message-content">
         <div className="message-meta">
           <strong>{bot?.name ?? data.user.name}</strong>
-          {bot && <span className="bot-tag">AGENT</span>}
+          {bot && <span className="bot-tag">数字员工</span>}
           <time
             dateTime={message.timestamp}
             title={new Date(message.timestamp).toLocaleString('zh-CN')}
@@ -240,7 +221,6 @@ function MessageItem({
             (f) => f.messageId === message.id && f.groupId === message.groupId,
           ) && (
             <div className="dialogue-retry-row" role="status">
-              <span>本轮处理失败，可检查模型设置后重试</span>
               {data.dialogueFailures
                 .filter((f) => f.messageId === message.id && f.groupId === message.groupId)
                 .map((f) => {
@@ -248,7 +228,7 @@ function MessageItem({
                   return failedBot ? (
                     <span className="dialogue-retry-item" key={f.botId}>
                       <small>
-                        {f.stage === 'attention' ? '注意力判断失败：' : ''}
+                        {f.stage === 'attention' ? '群消息判断失败：' : ''}
                         {f.error}
                       </small>
                       <button onClick={() => onRetryBot(message.id, f.botId)}>
@@ -393,11 +373,7 @@ export function Timeline({
             <div className="group-beginning">
               <span>{group.directBotId ? <BotIcon size={22} /> : <Hash size={22} />}</span>
               <h2>{group.name}</h2>
-              <p>
-                {group.directBotId
-                  ? `你与 ${group.name} 的单独聊天。`
-                  : '在这里和 Bot 一起完成想法。'}
-              </p>
+              {!group.directBotId && group.description && <p>{group.description}</p>}
             </div>
             <div className="date-divider">
               <span />
@@ -460,7 +436,7 @@ export function Timeline({
             ]
               .filter(Boolean)
               .join('、')}{' '}
-            正在回复…
+            正在处理消息…
           </p>
         )}
         <AnimatePresence>
@@ -501,13 +477,13 @@ export function Timeline({
                     <button key={bot.id} onClick={() => mention(bot)}>
                       <BotAvatar bot={bot} size="small" />
                       <strong>{bot.name}</strong>
-                      <span>本地能力</span>
-                      <small>{bot.status === 'offline' ? '离线' : '在线'}</small>
+
+                      <small>{statusLabel[bot.status]}</small>
                     </button>
                   ))
                 ) : (
                   <div className="mention-empty">
-                    {bots.length ? '没有匹配的 Bot' : '先在群组设置中添加 Bot'}
+                    {bots.length ? '没有匹配的数字员工' : '请先添加群组成员'}
                   </div>
                 )}
               </motion.div>
@@ -537,8 +513,8 @@ export function Timeline({
               connected
                 ? group.directBotId
                   ? `发送消息给 ${group.name}…`
-                  : `在 ${group.name} 中分享想法，输入 @ 提及 Agent…`
-                : '连接服务后，继续你的对话…'
+                  : `发送消息，输入 @ 指定数字员工…`
+                : '连接恢复后可发送消息'
             }
             onKeyDown={(e) => {
               // Some native input methods clear isComposing before the confirmation Enter.
@@ -562,7 +538,7 @@ export function Timeline({
             <div>
               {!group.directBotId && (
                 <IconButton
-                  label="提及 Bot"
+                  label="提及数字员工"
                   onPress={() => {
                     setMentionDismissed(false);
                     setMentionOpen((v) => !v);
@@ -592,9 +568,6 @@ export function Timeline({
         <div className="composer-footer">
           <span>
             <CornerDownLeft size={11} /> Enter 发送 <i>·</i> Shift + Enter 换行
-          </span>
-          <span>
-            想法，由此向前 <Sparkles size={12} />
           </span>
         </div>
       </div>

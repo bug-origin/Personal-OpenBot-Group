@@ -340,6 +340,7 @@ export class CodexExecution {
       };
       const result = await this.request(this.job.session ? 'thread/resume' : 'thread/start', {
         ...policy,
+        config: { web_search: 'live' },
         developerInstructions: botInstructions(this.job),
         ...(this.job.task.execution?.workspace
           ? { cwd: this.job.task.execution.workspace.path }

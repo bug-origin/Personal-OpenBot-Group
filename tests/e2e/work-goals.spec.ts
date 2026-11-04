@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../../apps/server/src/app';
+import { testModelConfig } from './model-fixtures';
 
 test('shows offline goal ownership and an actionable owner decision without requiring a worker', async ({
   page,
@@ -14,6 +15,7 @@ test('shows offline goal ownership and an actionable owner decision without requ
     databasePath: join(directory, 'db.sqlite'),
     token,
     clientOrigin: 'http://127.0.0.1:1421',
+    modelConfig: testModelConfig,
     coordinator: async (messages) => {
       const d = JSON.parse(messages[1].content!);
       return d.event.kind === 'message' && messages.at(-1)?.role !== 'tool'
@@ -80,11 +82,11 @@ test('shows offline goal ownership and an actionable owner decision without requ
     );
     await page.goto('/');
     await page.getByRole('button', { name: '活动记录', exact: true }).click();
-    await page.getByRole('button', { name: /^工作进展/ }).click();
+    await page.getByRole('button', { name: /^目标与任务/ }).click();
     const card = page.locator('.goal-card').filter({ hasText: '持续推进项目交付' });
-    await expect(card).toContainText('持续负责');
+    await expect(card).toContainText('进行中');
     await expect(card).toContainText('下次检查：');
-    await expect(card).toContainText('完成要求：交付内容已应用到目标项目');
+    await expect(card).toContainText('完成条件：应用到目标项目');
     for (let i = 0; i < 3; i++) {
       instance.runtime.checkProgress(
         Date.parse(instance.store.snapshot().goals![0].nextCheckAt!) + 1,
@@ -92,11 +94,11 @@ test('shows offline goal ownership and an actionable owner decision without requ
       await idle();
     }
     await expect(card).toContainText('需要你决定');
-    await expect(card.getByRole('status')).toContainText('连续复核未安排有效后续行动');
+    await expect(card.getByRole('status')).toContainText('目标尚未安排后续行动');
     expect(instance.store.snapshot().goals![0]).toMatchObject({ id, ownerWait: 1 });
     await page.reload();
     await page.getByRole('button', { name: '活动记录', exact: true }).click();
-    await page.getByRole('button', { name: /^工作进展/ }).click();
+    await page.getByRole('button', { name: /^目标与任务/ }).click();
     await expect(page.locator('.goal-card')).toContainText('需要你决定');
     await page.screenshot({ path: testInfo.outputPath('persistent-goal.png'), fullPage: true });
   } finally {

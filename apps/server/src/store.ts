@@ -25,6 +25,7 @@ export function createStore(path: string) {
     '013_task_pipelines.sql',
     '014_durable_work.sql',
     '015_work_ownership.sql',
+    '016_bot_avatars.sql',
   ]) {
     const hasHistory = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'")
@@ -144,9 +145,12 @@ export function createStore(path: string) {
           g.id,
         ).map((x) => x.botId),
       })),
-      bots: all<Bot>(
-        'SELECT id, owner_id AS ownerId, name, description, provider, status, bridge_id AS bridgeId, created_at AS createdAt FROM bots ORDER BY created_at',
-      ),
+      bots: all<Bot & { avatarType: 'emoji' | 'image' | null; avatarValue: string | null }>(
+        'SELECT b.id, b.owner_id AS ownerId, b.name, b.description, b.provider, b.status, b.bridge_id AS bridgeId, b.created_at AS createdAt, a.type AS avatarType, a.value AS avatarValue FROM bots b LEFT JOIN bot_avatars a ON a.bot_id=b.id ORDER BY b.created_at',
+      ).map(({ avatarType, avatarValue, ...bot }) => ({
+        ...bot,
+        avatar: avatarType && avatarValue ? { type: avatarType, value: avatarValue } : null,
+      })),
       messages: all<Omit<Message, 'mentions'> & { mentions: string }>(
         'SELECT id, group_id AS groupId, sender_id AS senderId, sender_type AS senderType, content, mentions, reply_to AS replyTo, timestamp, message_type AS messageType, correlation_id AS correlationId FROM messages ORDER BY timestamp, rowid',
       ).map((m) => {

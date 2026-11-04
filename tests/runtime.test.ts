@@ -372,7 +372,7 @@ describe('persistent conversation and asynchronous task branches', () => {
     expect(s.tasks).toHaveLength(1);
     expect(s.tasks[0].status).toBe('running');
     expect(
-      s.messages.some((m) => m.senderType === 'bot' && m.content.includes('正在执行你交代的操作')),
+      s.messages.some((m) => m.senderType === 'bot' && m.content.includes('正在运行命令')),
     ).toBe(true);
     expect(s.messages.some((m) => m.content === '我们可以继续讨论。')).toBe(true);
     expect(agent.mock.calls.at(-1)?.[0].memory).toContain('禁止改数据库');

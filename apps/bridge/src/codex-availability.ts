@@ -74,7 +74,7 @@ export function codexAvailability(
         else if (account?.requiresOpenaiAuth === true)
           finish({
             available: false,
-            reason: '当前 Codex Provider 需要 OpenAI 登录，请运行 codex login',
+            reason: '当前 Codex Provider 需要 OpenAI 登录',
           });
         else finish({ available: false, reason: 'Codex 未返回有效的认证配置，请检查或更新 CLI' });
       } catch {

@@ -10,7 +10,7 @@ const credential = z
   .string()
   .trim()
   .min(1, '请填写 API Key')
-  .max(8192)
+  .max(8192, 'API Key 过长，请检查是否误填了其他内容')
   .regex(/^[\x21-\x7e]+$/, 'API Key 格式无效');
 export const modelConnectionSchema = z
   .object({
@@ -24,13 +24,13 @@ export const modelConnectionSchema = z
       'zhipu',
       'compatible',
     ]),
-    baseUrl: z.string().min(1).max(2048),
+    baseUrl: z.string().min(1, '请填写 API 地址').max(2048, 'API 地址过长'),
     apiKey: credential.optional(),
   })
   .strict();
 export const modelSettingsSchema = modelConnectionSchema.extend({
-  model: z.string().trim().min(1, '请选择或填写模型').max(256),
-  attentionModel: z.string().trim().max(256).optional(),
+  model: z.string().trim().min(1, '请选择或填写模型').max(256, '模型 ID 不能超过 256 个字符'),
+  attentionModel: z.string().trim().max(256, '注意力模型 ID 不能超过 256 个字符').optional(),
 });
 type ConnectionInput = z.infer<typeof modelConnectionSchema>;
 type StoredConnection = { baseUrl: string; apiKey: string; model: string; attentionModel?: string };
@@ -102,6 +102,12 @@ export class ModelSettings {
       enabled: true,
     };
   }
+  isConfigured(): boolean {
+    const config = this.current();
+    return Boolean(
+      config.enabled && config.apiKey?.trim() && config.baseUrl.trim() && config.model.trim(),
+    );
+  }
   view(): ModelSettingsView {
     const config = this.current();
     return {
@@ -110,7 +116,7 @@ export class ModelSettings {
       model: config.apiKey ? config.model : '',
       attentionModel: config.apiKey ? (config.attentionModel ?? '') : '',
       hasKey: Boolean(config.apiKey),
-      enabled: config.enabled,
+      enabled: this.isConfigured(),
       providers: modelProviders.map((p) => ({
         id: p.id,
         name: p.name,

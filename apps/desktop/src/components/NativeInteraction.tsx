@@ -30,7 +30,7 @@ export function NativeInteraction({
     if (busy || !pending) return;
     setError('');
     if (!connected) {
-      setError('连接恢复后就可以回应。');
+      setError('连接已断开，恢复后可提交。');
       return;
     }
     setBusy(true);
@@ -53,7 +53,7 @@ export function NativeInteraction({
       }),
     );
     if ((request.questions ?? []).some((q) => !values[q.id]?.length)) {
-      setError('请回答每个问题后再提交。');
+      setError('请回答所有问题。');
       return;
     }
     void reply({ decision: 'accept', answers: values });
@@ -62,11 +62,11 @@ export function NativeInteraction({
     <section
       className="native-interaction"
       data-native-request={request.id}
-      aria-label={question ? 'Agent 原生提问' : 'Agent 原生权限请求'}
+      aria-label={question ? '执行提问' : '操作授权'}
     >
       <div className="native-interaction-origin">
         {question ? <MessageCircleQuestion size={15} /> : <ShieldCheck size={15} />}
-        <span>{question ? 'Agent 原生提问' : '原生权限请求 · 由系统转发'}</span>
+        <span>{question ? '需要回答' : '操作授权'}</span>
       </div>
       <strong className="native-interaction-title">{request.title}</strong>
       {request.reason && <p className="native-interaction-reason">{request.reason}</p>}
@@ -152,7 +152,7 @@ export function NativeInteraction({
                 isDisabled={busy}
                 onPress={() => void reply({ decision: 'decline' })}
               >
-                暂不回答
+                拒绝回答
               </Button>
             </div>
           )}
@@ -165,7 +165,7 @@ export function NativeInteraction({
             isPending={busy}
             onPress={() => void reply({ decision: 'accept', scope: 'once' })}
           >
-            允许
+            允许本次
           </Button>
           {request.allowSession && (
             <Button
@@ -193,10 +193,16 @@ export function NativeInteraction({
       {!pending && (
         <p className="native-interaction-status" role="status">
           {request.status === 'cancelled'
-            ? '这条请求已经失效，无需再回应。'
+            ? '请求已失效'
             : response?.decision === 'decline'
-              ? '已把你的拒绝交给原来的 Agent。'
-              : '已提交，等待原来的 Agent 继续。'}
+              ? question
+                ? '已拒绝回答'
+                : '已拒绝'
+              : question
+                ? '已回答'
+                : response?.scope === 'session'
+                  ? '已允许本次会话'
+                  : '已允许本次操作'}
         </p>
       )}
     </section>

@@ -15,7 +15,17 @@ import { request, type Connection } from '../lib/client';
 
 type Mutate = <T>(path: string, body?: unknown, method?: string) => Promise<T>;
 
-export function SettingsView({ connection, mutate }: { connection: Connection; mutate: Mutate }) {
+export function SettingsView({
+  connection,
+  mutate,
+  setupRequired = false,
+  onCreateBot,
+}: {
+  connection: Connection;
+  mutate: Mutate;
+  setupRequired?: boolean;
+  onCreateBot?: () => void;
+}) {
   const [settings, setSettings] = useState<ModelSettingsView | null>(null);
   const [provider, setProvider] = useState<ModelProvider>('deepseek');
   const [baseUrl, setBaseUrl] = useState('');
@@ -154,17 +164,22 @@ export function SettingsView({ connection, mutate }: { connection: Connection; m
         </span>
         <div>
           <h1>对话模型</h1>
-          <p>为每位数字员工选择思考、沟通和安排工作的模型。</p>
+          <p>所有数字员工共用此模型配置。</p>
         </div>
       </div>
+      {setupRequired && !settings.enabled && (
+        <p className="inline-note" role="status">
+          请先填写 API Key、选择对话模型并保存，再创建数字员工和群组，开始聊天与协作。
+        </p>
+      )}
       <div className={`model-current ${settings.enabled ? 'configured' : ''}`}>
         <span className="model-status-dot" />
         <div>
-          <strong>{settings.enabled ? '正在使用' : '尚未配置'}</strong>
+          <strong>{settings.enabled ? '已配置' : '尚未配置'}</strong>
           <span>
             {settings.enabled
               ? `${activeProvider?.name} / ${settings.model}`
-              : '填写 API Key，选择一个模型即可开始。'}
+              : '填写 API Key 并选择模型。'}
           </span>
         </div>
         {settings.enabled && <Check size={17} />}
@@ -206,9 +221,7 @@ export function SettingsView({ connection, mutate }: { connection: Connection; m
               type={visible ? 'text' : 'password'}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder={
-                savedKey ? '输入新的 Key 可替换，留空则沿用' : '填写服务商提供的 API Key'
-              }
+              placeholder={savedKey ? '留空沿用已保存的 Key' : '填写服务商提供的 API Key'}
               autoComplete="off"
               spellCheck={false}
             />
@@ -220,7 +233,7 @@ export function SettingsView({ connection, mutate }: { connection: Connection; m
               {visible ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
-          <small>Key 仅保存在本机，不会出现在聊天记录中。</small>
+          <small>Key 保存在本机，请求时发送给填写的 API 地址。</small>
         </label>
         <label className="settings-field" htmlFor="model-base-url">
           <span>API 地址</span>
@@ -240,8 +253,8 @@ export function SettingsView({ connection, mutate }: { connection: Connection; m
           />
           <small>
             {provider === 'compatible'
-              ? '填写兼容 OpenAI 的 API 根地址，通常以 /v1 结尾。'
-              : '已填入官方地址。使用其他地址时，需要为该地址重新填写 Key。'}
+              ? '填写 API 根地址，通常以 /v1 结尾。'
+              : '更改地址后需重新填写 API Key。'}
           </small>
         </label>
         <div className="settings-field">
@@ -278,10 +291,12 @@ export function SettingsView({ connection, mutate }: { connection: Connection; m
               >
                 <option value="">
                   {loading
-                    ? '正在获取可用模型…'
+                    ? '正在获取模型…'
                     : models.length
                       ? '请选择模型'
-                      : '填写 API Key 后自动获取'}
+                      : apiKey.trim() || savedKey
+                        ? '暂无模型，请刷新或手动填写'
+                        : '填写 API Key 后自动获取'}
                 </option>
                 {model && !models.some((m) => m.id === model) && (
                   <option value={model}>{model}</option>
@@ -303,8 +318,8 @@ export function SettingsView({ connection, mutate }: { connection: Connection; m
           <div className="settings-model-help">
             <small>
               {models.length
-                ? `已获取 ${models.length} 个可用模型`
-                : '模型列表来自你所填写的服务商账号。'}
+                ? `已获取 ${models.length} 个模型`
+                : '支持工具调用的模型才能安排任务。'}
             </small>
             <button
               type="button"
@@ -355,7 +370,7 @@ export function SettingsView({ connection, mutate }: { connection: Connection; m
               </div>
             )}
             <div className="settings-model-help">
-              <small>仅判断群消息是否需要自己参与，与对话独立运行；私聊和直接提及跳过判断。</small>
+              <small>判断是否参与群聊；私聊和直接提及无需判断。</small>
               <button
                 type="button"
                 className="settings-text-button"
@@ -376,7 +391,7 @@ export function SettingsView({ connection, mutate }: { connection: Connection; m
             {success && (
               <>
                 <Check size={15} />
-                已保存，所有 Bot 的后续对话立即生效。
+                已保存
               </>
             )}
           </span>
@@ -390,10 +405,14 @@ export function SettingsView({ connection, mutate }: { connection: Connection; m
           </Button>
         </div>
       </form>
-      <div className="settings-footnote">
-        <strong>对话与执行，各司其职。</strong>
-        <p>这里选择 Bot 的对话模型。本地执行能力由 Bot 按任务需要自动调用。</p>
-      </div>
+      {settings.enabled && onCreateBot && (
+        <div className="model-setup-next">
+          <p>对话模型已就绪，接下来创建你的第一位数字员工。</p>
+          <Button className="accent-button" onPress={onCreateBot}>
+            创建数字员工
+          </Button>
+        </div>
+      )}
     </section>
   );
 }

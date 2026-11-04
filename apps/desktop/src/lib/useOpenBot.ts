@@ -39,7 +39,13 @@ export function useOpenBot() {
       } catch (e) {
         if (cancelled) return;
         setStatus('offline');
-        setError(typeof e === 'string' ? e : '本地服务暂时无法启动，请重试。');
+        setError(
+          typeof e === 'string'
+            ? e
+            : e instanceof Error
+              ? e.message
+              : '本地服务暂时无法启动，请重试。',
+        );
         recovery = setTimeout(retry, 5000);
       }
     }

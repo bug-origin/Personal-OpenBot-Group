@@ -26,7 +26,10 @@ export function Diagram({ source }: { source: string }) {
             FORBID_TAGS: ['foreignObject', 'a'],
           });
       } catch (e) {
-        if (active) setError('流程图暂不可用：' + String(e));
+        if (active)
+          setError(
+            source.length > 16000 ? '图表内容过长，无法显示。' : '无法显示图表，请检查图表内容。',
+          );
       }
     })();
     return () => {

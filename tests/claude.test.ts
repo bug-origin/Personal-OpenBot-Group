@@ -36,6 +36,7 @@ send({type:'stream_event',event:{type:'content_block_delta',delta:{type:'thinkin
 send({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'interim'}}});
 send({type:'assistant',parent_tool_use_id:'child',message:{id:'child',content:[{type:'text',text:'child output'}]}});
 send({type:'assistant',message:{id:'answer',content:[{type:'thinking',thinking:'PRIVATE THINKING NEVER EXPOSE'},{type:'text',text:'I am reading'},{type:'tool_use',id:'tool',name:'Read',input:{file_path:'README.md'}}]}});
+if(mode==='web'){send({type:'control_request',request_id:'web-1',request:{subtype:'can_use_tool',tool_name:'WebFetch',input:{url:'https://example.com/news',prompt:'Read the publication date and summarize the news'}}});return;}
 if(mode==='question'||mode==='permission'){send({type:'control_request',request_id:'control-1',request:{subtype:'can_use_tool',tool_name:mode==='question'?'AskUserQuestion':'Write',input:mode==='question'?{questions:[{header:'环境',question:'选择环境',options:[{label:'开发',description:'本地'},{label:'测试',description:'验证'}],multiSelect:false}]}:{file_path:'example.txt',content:'exact original content'}}});return;}
 if(mode==='stalled')return;
 if(mode==='early-exit'){process.exit(0);return;}
@@ -103,6 +104,38 @@ it('denies Claude writes from a read-only assignment before requesting owner app
   });
 });
 
+it('permits web research in a read-only job and forwards fetch permission to the same process', async () => {
+  const f = fixture('web');
+  f.job.resourceMode = 'read';
+  let captured: any;
+  const execution = new ClaudeExecution(f.executable, f.job, {
+    session: () => {},
+    progress: () => {},
+    approval: () => {},
+    interaction: (id, spec) => {
+      captured = spec;
+      setTimeout(() => execution.respond(id, { decision: 'accept' }), 0);
+    },
+  });
+  expect(await execution.run()).toMatchObject({
+    status: 'completed',
+    text: 'native reply accepted',
+  });
+  expect(captured).toMatchObject({
+    kind: 'tool',
+    details: { tool: 'WebFetch', input: { url: 'https://example.com/news' } },
+  });
+  const saved = JSON.parse(readFileSync(f.requests, 'utf8'));
+  expect(saved.response).toMatchObject({
+    request_id: 'web-1',
+    response: { behavior: 'allow', updatedInput: { url: 'https://example.com/news' } },
+  });
+  const tools = saved.args[saved.args.indexOf('--tools') + 1].split(',');
+  expect(tools).toEqual(expect.arrayContaining(['WebSearch', 'WebFetch']));
+  expect(tools).not.toContain('Bash');
+  expect(tools).not.toContain('Write');
+});
+
 it('requires host approval for writes, confirms the real input, keeps thinking private and returns the terminal result', async () => {
   const f = fixture();
   const sessions: string[] = [],
@@ -128,14 +161,16 @@ it('requires host approval for writes, confirms the real input, keeps thinking p
   expect([...activity, ...progress].join(' ')).not.toMatch(/PRIVATE THINKING|child output/);
   const { args, frame } = JSON.parse(readFileSync(f.requests, 'utf8'));
   expect(frame.message.content).toBe('read the project');
-  expect(args[args.indexOf('--tools') + 1]).toBe('Read,Glob,Grep,Bash,Edit,Write,AskUserQuestion');
+  expect(args[args.indexOf('--tools') + 1]).toBe(
+    'Read,Glob,Grep,WebSearch,WebFetch,Bash,Edit,Write,AskUserQuestion',
+  );
   expect(args).toContain('--restricted');
   expect(args).toContain('--safe-mode');
   expect(args[args.indexOf('--add-dir') + 1]).toBe(parse(homedir()).root);
   expect(args[args.indexOf('--permission-mode') + 1]).toBe('manual');
-  expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,Glob,Grep');
+  expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,Glob,Grep,WebSearch');
   expect(JSON.parse(args[args.indexOf('--settings') + 1])).toEqual({
-    permissions: { ask: ['Bash', 'Edit', 'Write'] },
+    permissions: { ask: ['Bash', 'Edit', 'Write', 'WebFetch'] },
   });
   expect(args).toContain('--strict-mcp-config');
   expect(args).not.toContain('--dangerously-skip-permissions');

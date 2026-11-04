@@ -31,7 +31,7 @@ export function BotAvatar({
   bot,
   size = 'normal',
 }: {
-  bot?: Pick<Bot, 'provider' | 'status' | 'name'>;
+  bot?: Pick<Bot, 'provider' | 'name' | 'avatar'> & Partial<Pick<Bot, 'status'>>;
   size?: 'normal' | 'large' | 'small';
 }) {
   const tone = bot?.name
@@ -41,14 +41,22 @@ export function BotAvatar({
     <span
       className={`bot-avatar ${tone === null ? '' : `avatar-tone-${tone}`} ${bot?.provider ?? 'generic'} ${size}`}
     >
-      <BotIcon size={size === 'large' ? 26 : size === 'small' ? 15 : 19} />
-      {bot && <i className={`presence ${bot.status}`} />}
+      {bot?.avatar?.type === 'image' ? (
+        <img className="bot-avatar-photo" src={bot.avatar.value} alt={`${bot.name} 的头像`} />
+      ) : bot?.avatar?.type === 'emoji' ? (
+        <span className="bot-avatar-emoji" role="img" aria-label={`${bot.name} 的头像`}>
+          {bot.avatar.value}
+        </span>
+      ) : (
+        <BotIcon size={size === 'large' ? 26 : size === 'small' ? 15 : 19} />
+      )}
+      {bot?.status && <i className={`presence ${bot.status}`} />}
     </span>
   );
 }
 export function Status({ status }: { status: Bot['status'] }) {
   return (
-    <span className={`status-label ${status}`}>
+    <span className={`status-label ${status}`} title="本地执行状态">
       <i />
       {statusLabel[status]}
     </span>
@@ -82,7 +90,7 @@ export function Dialog({
             <Modal.Header>
               <div className="dialog-heading">
                 <Modal.Heading>{title}</Modal.Heading>
-                <IconButton label="关闭" onPress={onClose}>
+                <IconButton label="关闭弹窗" onPress={onClose}>
                   <X size={18} />
                 </IconButton>
               </div>

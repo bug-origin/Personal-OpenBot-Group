@@ -74,7 +74,7 @@ export class Runtime {
       const bot = this.store.snapshot().bots.find((b) => b.id === botId);
       const link = bot?.bridgeId ? this.links.get(bot.bridgeId) : undefined;
       if (!link || !this.running(link.info.id, taskId, leaseId))
-        throw Object.assign(new Error('本地连接已断开，请等待 Bot 重新发起请求'), {
+        throw Object.assign(new Error('本地执行连接已断开，当前请求无法继续。'), {
           statusCode: 409,
         });
       link.send({ type: 'native_reply', taskId, leaseId, requestId, response });
@@ -127,7 +127,7 @@ export class Runtime {
           const bot = this.store.snapshot().bots.find((b) => b.id === botId);
           return (
             (bot?.bridgeId ? this.links.get(bot.bridgeId)?.info.providers : [])
-              ?.filter((p) => p.available)
+              ?.filter((p) => p.available && p.provider === bot?.provider)
               .map((p) => p.provider) ?? []
           );
         },
@@ -196,15 +196,7 @@ export class Runtime {
       bot.bridgeId &&
       this.links
         .get(bot.bridgeId)
-        ?.info.providers.some(
-          (p) =>
-            p.available &&
-            (provider
-              ? p.provider === provider
-              : this.coordinator
-                ? true
-                : p.provider === bot.provider),
-        ),
+        ?.info.providers.some((p) => p.available && p.provider === (provider ?? bot.provider)),
     );
   }
   private availableBridges(provider: Provider) {
@@ -213,12 +205,10 @@ export class Runtime {
     );
   }
   creationBridge(provider: Provider, selected?: string): string | null {
-    let available = this.availableBridges(provider);
-    if (!available.length && this.coordinator)
-      available = this.bridges.filter((b) => b.providers.some((p) => p.available));
+    const available = this.availableBridges(provider);
     if (selected) {
       if (!available.some((bridge) => bridge.id === selected))
-        throw Object.assign(new Error('所选设备的 Agent 暂不可用，请重新选择'), {
+        throw Object.assign(new Error('所选设备的执行工具暂不可用，请重新选择'), {
           statusCode: 409,
         });
       return selected;
@@ -232,12 +222,7 @@ export class Runtime {
     this.links.set(info.id, { info, send, close });
     this.store.db.transaction(() => {
       for (const bot of this.store.snapshot().bots) {
-        const preferred = this.availableBridges(bot.provider);
-        const available = bot.bridgeId
-          ? []
-          : preferred.length || !this.coordinator
-            ? preferred
-            : this.bridges.filter((b) => b.providers.some((p) => p.available));
+        const available = bot.bridgeId ? [] : this.availableBridges(bot.provider);
         const bridgeId = bot.bridgeId ?? (available.length === 1 ? available[0].id : null);
         if (bridgeId && (!bot.bridgeId || bridgeId === info.id))
           this.store.db
@@ -310,26 +295,29 @@ export class Runtime {
   }
   bind(botId: string, bridgeId: string) {
     const bot = this.store.snapshot().bots.find((b) => b.id === botId);
-    if (!bot) throw Object.assign(new Error('Bot 不存在'), { statusCode: 404 });
+    if (!bot) throw Object.assign(new Error('数字员工不存在'), { statusCode: 404 });
+    this.configureExecution(botId, bot.provider, bridgeId);
+  }
+  configureExecution(botId: string, provider: Provider, selectedBridge?: string) {
+    const bot = this.store.snapshot().bots.find((b) => b.id === botId);
+    if (!bot) throw Object.assign(new Error('数字员工不存在'), { statusCode: 404 });
     if (
       this.store
         .snapshot()
-        .tasks.some((t) => t.botId === botId && ['running', 'cancelling'].includes(t.status))
+        .tasks.some(
+          (t) =>
+            t.botId === botId &&
+            ['queued', 'running', 'cancelling', 'reviewing'].includes(t.status),
+        )
     )
-      throw Object.assign(new Error('请先停止当前任务，再修改绑定'), { statusCode: 409 });
-    const link = this.links.get(bridgeId);
-    if (
-      !link?.info.providers.some(
-        (p) => p.available && (this.coordinator || p.provider === bot.provider),
-      )
-    )
-      throw Object.assign(new Error('Bridge 未连接或该 Provider 尚不可用'), { statusCode: 409 });
+      throw Object.assign(new Error('请先完成或停止当前任务，再修改执行设置'), { statusCode: 409 });
+    const bridgeId = this.creationBridge(provider, selectedBridge);
     this.store.db.transaction(() => {
-      if (bot.bridgeId !== bridgeId)
+      if (bot.bridgeId !== bridgeId || bot.provider !== provider)
         this.store.db.prepare('DELETE FROM agent_sessions WHERE bot_id=?').run(botId);
       this.store.db
-        .prepare("UPDATE bots SET bridge_id=?,status='idle' WHERE id=?")
-        .run(bridgeId, botId);
+        .prepare('UPDATE bots SET bridge_id=?,provider=?,status=? WHERE id=?')
+        .run(bridgeId, provider, bridgeId ? 'idle' : 'offline', botId);
     })();
     this.changed();
     this.schedule();
@@ -521,14 +509,7 @@ export class Runtime {
       );
     const executionProvider = new Map<Bot, Provider>();
     const online = targets.filter((b) => {
-      const available = b.bridgeId
-        ? (this.links
-            .get(b.bridgeId)
-            ?.info.providers.filter((p) => p.available)
-            .map((p) => p.provider) ?? [])
-        : [];
-      const selected =
-        options?.provider ?? (this.coordinator ? (available[0] ?? b.provider) : b.provider);
+      const selected = options?.provider ?? b.provider;
       if (this.coordinator) {
         executionProvider.set(b, selected);
         return true;
@@ -1149,7 +1130,7 @@ export class Runtime {
           ? 'cancelled'
           : 'failed';
     const text = (event.text ?? '').slice(0, 64000);
-    const error = status === 'failed' ? (event.error ?? 'Agent 执行失败').slice(0, 1000) : null;
+    const error = status === 'failed' ? (event.error ?? '执行失败').slice(0, 1000) : null;
     this.store.db.transaction(() => {
       this.store.db
         .prepare('UPDATE tasks SET status=?,finished_at=?,result=?,error=? WHERE id=?')
@@ -1177,7 +1158,7 @@ export class Runtime {
           .prepare('UPDATE task_specs SET activity=?,updated_at=? WHERE task_id=?')
           .run(
             status === 'reviewing'
-              ? '执行结果已返回，正在检查'
+              ? '执行结果已返回，等待验收'
               : status === 'completed'
                 ? '执行已完成'
                 : status === 'cancelled'
@@ -1269,8 +1250,7 @@ export class Runtime {
           this.store.insertMessage(reply);
           if (task.status !== 'cancelling')
             this.enqueue(reply, reply.mentions, task.correlationId, task.round + 1);
-        } else
-          this.note(task.groupId, '已经处理完了，暂时没有更多内容需要补充。', task.correlationId);
+        } else this.note(task.groupId, '执行已结束，没有返回结果内容。', task.correlationId);
       } else
         this.note(
           task.groupId,
@@ -1496,7 +1476,7 @@ export class Runtime {
     const task = this.taskStatus(id).task;
     if (task.goalId) {
       const g = this.goals.get(task.goalId);
-      if (!g.legacy) this.goals.attention(g.id, '本次执行已停止，等待所有者决定目标的后续安排');
+      if (!g.legacy) this.goals.attention(g.id, '本次执行已停止，请确认目标的下一步安排。');
       else
         this.store.db
           .prepare("UPDATE work_goals SET state='cancelled',next_check_at=NULL WHERE id=?")
@@ -1561,7 +1541,7 @@ export class Runtime {
       .prepare('SELECT lease_id FROM task_runtime WHERE task_id=?')
       .get(task.id) as { lease_id: string };
     const link = this.links.get(bot.bridgeId);
-    if (!link) throw Object.assign(new Error('Bridge 已离线'), { statusCode: 409 });
+    if (!link) throw Object.assign(new Error('本地执行未连接'), { statusCode: 409 });
     link.send({
       type: 'approval',
       taskId: task.id,

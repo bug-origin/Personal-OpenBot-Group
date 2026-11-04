@@ -83,6 +83,7 @@ it('drives the native protocol with an explicit read-only policy and publishes f
     sandbox: 'read-only',
     approvalPolicy: 'on-request',
     approvalsReviewer: 'user',
+    config: { web_search: 'live' },
   });
   const instructions = frames.find((m) => m.method === 'thread/start').params.developerInstructions;
   expect(
@@ -184,6 +185,9 @@ it('resumes a native conversation with only changes not yet accepted by that thr
     .split('\n')
     .map((line) => JSON.parse(line));
   expect(frames.some((m) => m.method === 'thread/resume')).toBe(true);
+  expect(frames.find((m) => m.method === 'thread/resume').params.config).toEqual({
+    web_search: 'live',
+  });
   expect(frames.find((m) => m.method === 'thread/resume').params.developerInstructions).toContain(
     'opsique-ui/0.1',
   );
