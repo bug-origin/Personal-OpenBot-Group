@@ -4351,6 +4351,117 @@ svg {
   font-size: inherit;
   color: #ad4240;
 }
+.work-scope {
+  margin: -3px 0 14px;
+  color: #737373;
+  font-size: 11px;
+  line-height: 1.65;
+}
+.current-work-card {
+  margin: 12px 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafafa;
+  overflow-wrap: anywhere;
+}
+.work-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.work-card-header .task-state {
+  font-size: 11px;
+  font-weight: 500;
+}
+.work-card-header time {
+  font-size: 10px;
+  color: #737373;
+}
+.current-work-card h4 {
+  margin: 9px 0;
+  color: #262626;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+.work-owner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+  font-size: 11px;
+  color: #525252;
+}
+.work-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: left;
+  color: #737373;
+}
+.work-source-link {
+  color: #4c6989;
+  cursor: pointer;
+}
+.work-source-link:hover {
+  text-decoration: underline;
+}
+.work-source-link svg {
+  flex-shrink: 0;
+}
+.work-summary {
+  margin: 11px 0;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.work-summary > div + div {
+  margin-top: 8px;
+}
+.work-summary dt {
+  color: #737373;
+}
+.work-summary dd {
+  margin: 2px 0 0;
+  color: #404040;
+  white-space: pre-wrap;
+}
+.work-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.work-actions:empty {
+  display: none;
+}
+.work-actions .button {
+  height: 27px;
+  font-size: 11px;
+}
+.work-end-confirm p {
+  margin: 0 0 8px;
+  color: #ad4240;
+  font-size: 11px;
+  line-height: 1.65;
+}
+.work-details {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+}
+.work-details summary {
+  color: #737373;
+  cursor: pointer;
+  font-size: 11px;
+}
+.work-details .task-card {
+  background: #fff;
+}
 .bot-avatar.avatar-tone-0 {
   background: #eef2fb;
   border-color: #dce4f4;

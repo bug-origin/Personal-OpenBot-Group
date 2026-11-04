@@ -3,6 +3,8 @@ import { ArrowUpRight, Bot as BotIcon, ListTodo, Plus } from 'lucide-react';
 import type { Bot, Group, Snapshot, Task, WorkGoal, WorkArtifact } from '@openbot/shared';
 import { workActivity, conversationalText } from '@openbot/shared';
 import { BotAvatar, EmptySmall, IconButton, Status } from './Primitives';
+import { currentWork } from '../lib/currentWork';
+import { CurrentWorkCard } from './CurrentWorkCard';
 export const taskLabels: Record<Task['status'], string> = {
   queued: '等待执行',
   running: '执行中',
@@ -165,7 +167,9 @@ export function Overview({
   onBridge,
   onBot,
   onStop,
+  onStopGoal,
   onApprove,
+  onGroup,
 }: {
   data: Snapshot;
   group: Group;
@@ -173,21 +177,13 @@ export function Overview({
   onBridge: (bot?: Bot) => void;
   onBot: () => void;
   onStop: (id: string) => void;
+  onStopGoal: (id: string) => Promise<void>;
   onApprove: (id: string, decision: 'accept' | 'decline') => Promise<void>;
+  onGroup: (id: string) => void;
 }) {
   const bots = data.bots.filter((b) => group.botIds.includes(b.id));
-  const tasks = data.tasks.filter((t) => t.groupId === group.id);
-  const active = tasks.filter(
-    (t) =>
-      t.status === 'running' ||
-      t.status === 'queued' ||
-      t.status === 'cancelling' ||
-      t.status === 'reviewing',
-  );
-  const goals =
-    data.goals?.filter(
-      (g) => !g.legacy && g.groupId === group.id && !['completed', 'cancelled'].includes(g.state),
-    ) ?? [];
+  const work = currentWork(data, group);
+  const taskIds = new Set(work.flatMap((item) => item.tasks.map((task) => task.id)));
   return (
     <aside className="overview">
       <div className="overview-heading">
@@ -232,37 +228,40 @@ export function Overview({
       <section className="overview-section">
         <div className="section-title">
           <h3>
-            当前工作 <span>{active.length + goals.length}</span>
+            当前工作 <span>{work.length}</span>
           </h3>
           <ListTodo size={15} />
         </div>
-        {goals.map((g) => (
-          <GoalCard
-            key={g.id}
-            goal={g}
-            bot={bots.find((b) => b.id === g.botId)}
-            artifacts={data.artifacts}
-          />
-        ))}
-        {active.length ? (
-          active.map((t) => (
-            <TaskCard
-              key={t.id}
-              task={t}
-              bot={bots.find((b) => b.id === t.botId)}
+        <p className="work-scope">
+          {group.directBotId ? '该 Bot 在所有会话中尚未结束的工作。' : '本群尚未结束的工作。'}
+          同一目标的多次执行合并显示。
+        </p>
+        {work.length ? (
+          work.map((item) => (
+            <CurrentWorkCard
+              key={item.id}
+              item={item}
+              data={data}
+              group={group}
+              onGroup={onGroup}
               onStop={onStop}
+              onStopGoal={onStopGoal}
             />
           ))
-        ) : !goals.length ? (
+        ) : (
           <EmptySmall
             icon={<ListTodo size={21} />}
             title="暂无进行中的工作"
-            description="目标和任务进展会显示在这里。"
+            description={
+              group.directBotId
+                ? '该 Bot 接手工作后，进展会显示在这里。'
+                : 'Bot 在本群接手工作后，进展会显示在这里。'
+            }
           />
-        ) : null}
+        )}
       </section>
       {data.approvals
-        ?.filter((a) => a.status === 'pending' && tasks.some((t) => t.id === a.taskId))
+        ?.filter((a) => a.status === 'pending' && taskIds.has(a.taskId))
         .map((a) => (
           <section className="overview-section approval-card" key={a.id}>
             <strong>需要你授权</strong>

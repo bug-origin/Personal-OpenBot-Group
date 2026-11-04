@@ -124,6 +124,13 @@ export default function App() {
       setError((e as Error).message);
     }
   }
+  async function stopGoal(id: string) {
+    try {
+      await mutate(`/api/goals/${id}/stop`, {});
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   async function retryMessage(id: string, botId: string) {
     if (!requireModel()) return;
     try {
@@ -512,6 +519,8 @@ export default function App() {
                     onBridge={showBridge}
                     onBot={createBot}
                     onStop={(id) => void stopChain(id)}
+                    onStopGoal={stopGoal}
+                    onGroup={selectGroup}
                     onApprove={async (id, decision) => {
                       try {
                         await mutate(`/api/approvals/${id}`, { decision });
